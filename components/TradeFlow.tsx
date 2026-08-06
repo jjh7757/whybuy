@@ -423,7 +423,10 @@ export function TradeFlow() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-neutral-50 p-4 text-sm sm:grid-cols-3">
+                {/* 🔴 AI 해석이 언급하는 값은 표에도 있어야 합니다. 한쪽에만 있으면
+                    사용자가 "AI가 말한 BPS가 어디 있지" 하고 화면을 뒤지게 됩니다.
+                    고가·저가는 위의 `오늘 범위` 막대가 대신하므로 여기서 뺐습니다. */}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-neutral-50 p-4 text-sm sm:grid-cols-4">
                   <Metric label="시가" value={won(quote.open)} />
                   <Metric
                     label="거래량"
@@ -433,6 +436,7 @@ export function TradeFlow() {
                   <Metric label="PER" value={ratioLabel(quote.per)} />
                   <Metric label="PBR" value={ratioLabel(quote.pbr)} />
                   <Metric label="EPS" value={quote.eps === null ? "—" : won(quote.eps)} />
+                  <Metric label="BPS" value={quote.bps === null ? "—" : won(quote.bps)} />
                 </div>
 
                 <AiExplain target="quote" stockCode={selected.stock_code} />
