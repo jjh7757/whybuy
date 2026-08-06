@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AiExplain } from "@/components/AiExplain";
 
 type Balance = {
   deposit: number;
@@ -77,6 +78,8 @@ export function AccountCard() {
           ))}
         </ul>
       )}
+
+      <AiExplain target="account" />
     </div>
   );
 }

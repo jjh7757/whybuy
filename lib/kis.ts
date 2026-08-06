@@ -134,6 +134,56 @@ export async function callKis(
   return res.json();
 }
 
+type QuoteResponse = {
+  output: {
+    stck_prpr: string; // 현재가
+    prdy_vrss: string; // 전일대비
+    prdy_ctrt: string; // 전일대비율
+    stck_oprc: string; // 시가
+    stck_hgpr: string; // 고가
+    stck_lwpr: string; // 저가
+    acml_vol: string; // 누적거래량
+    bstp_kor_isnm: string; // 업종명
+    rprs_mrkt_kor_name: string; // 대표시장명
+  };
+};
+
+/**
+ * 종목 현재가를 조회합니다. 휴장일에는 전일 종가가 응답됩니다.
+ *
+ * 존재하지 않는 종목코드도 rt_cd=0으로 응답하되 현재가가 0이므로,
+ * 값이 0이면 조회 실패로 봅니다.
+ */
+export async function getQuote(stockCode: string) {
+  const data = (await callKis(
+    "/uapi/domestic-stock/v1/quotations/inquire-price",
+    {
+      trId: "FHKST01010100",
+      query: {
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_INPUT_ISCD: stockCode,
+      },
+    },
+  )) as QuoteResponse;
+
+  const o = data.output;
+  const price = Number(o?.stck_prpr ?? 0);
+  if (!price) throw new Error(`시세를 조회하지 못했습니다 (${stockCode})`);
+
+  return {
+    stockCode,
+    price,
+    change: Number(o.prdy_vrss),
+    changeRate: Number(o.prdy_ctrt),
+    open: Number(o.stck_oprc),
+    high: Number(o.stck_hgpr),
+    low: Number(o.stck_lwpr),
+    volume: Number(o.acml_vol),
+    sector: o.bstp_kor_isnm,
+    market: o.rprs_mrkt_kor_name,
+  };
+}
+
 type BalanceResponse = {
   output1: Array<{
     pdno: string; // 종목코드
