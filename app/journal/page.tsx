@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { AuthButton } from "@/components/AuthButton";
+import { AppHeader } from "@/components/AppHeader";
 import { JournalList, type JournalRow } from "@/components/JournalList";
 import { JournalReview } from "@/components/JournalReview";
 
@@ -24,34 +24,30 @@ export default async function JournalPage() {
   } = await supabase.auth.getUser();
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-6 sm:p-10">
-      <header className="flex items-center justify-between">
-        <Link href="/" className="text-lg font-semibold">
-          왜샀어 · WhyBuy
-        </Link>
-        <AuthButton />
-      </header>
+    <>
+      <AppHeader current="/journal" />
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-5 py-6 sm:px-8 sm:py-8">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">지난 근거 보기</h1>
+          <p className="mt-1 text-sm text-neutral-500">
+            주문할 때 남긴 판단 근거를 모아 봅니다.
+          </p>
+        </div>
 
-      <div>
-        <h1 className="text-xl font-semibold">지난 근거 보기</h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          주문할 때 남긴 판단 근거를 모아 봅니다.
-        </p>
-      </div>
-
-      {!user ? <LoginPrompt /> : <JournalBody />}
-    </main>
+        {!user ? <LoginPrompt /> : <JournalBody />}
+      </main>
+    </>
   );
 }
 
 function LoginPrompt() {
   return (
-    <div className="rounded-lg border border-neutral-200 p-6 text-center">
+    <div className="rounded-xl border border-neutral-200 bg-white p-8 text-center">
       <p className="text-sm text-neutral-600">
         내 근거를 보려면 로그인이 필요합니다.
       </p>
       <p className="mt-1 text-sm text-neutral-500">
-        위의 [Google로 계속하기] 버튼을 눌러주세요.
+        오른쪽 위의 [로그인] 버튼을 눌러주세요.
       </p>
     </div>
   );
@@ -123,21 +119,23 @@ function Summary({
   gut: number;
 }) {
   return (
-    <div className="grid grid-cols-3 gap-4 rounded-lg border border-neutral-200 p-4 text-sm">
+    <div className="grid grid-cols-3 gap-4 rounded-xl border border-neutral-200 bg-white p-5 text-sm">
       <div>
-        <div className="text-neutral-500">총 주문</div>
-        <div className="font-medium">{total}건</div>
+        <div className="text-xs text-neutral-500">총 주문</div>
+        <div className="tnum mt-0.5 text-lg font-bold">{total}건</div>
       </div>
       <div>
-        <div className="text-neutral-500">근거 기록</div>
-        <div className="font-medium">
-          {total}건 중 {withReason}건
+        <div className="text-xs text-neutral-500">근거 기록</div>
+        <div className="tnum mt-0.5 text-lg font-bold">
+          {withReason}
+          <span className="text-sm font-medium text-neutral-400">/{total}건</span>
         </div>
       </div>
       <div>
-        <div className="text-neutral-500">그냥 감</div>
-        <div className="font-medium">
-          {total}건 중 {gut}건
+        <div className="text-xs text-neutral-500">그냥 감</div>
+        <div className="tnum mt-0.5 text-lg font-bold">
+          {gut}
+          <span className="text-sm font-medium text-neutral-400">/{total}건</span>
         </div>
       </div>
     </div>
@@ -146,14 +144,14 @@ function Summary({
 
 function EmptyState() {
   return (
-    <div className="rounded-lg border border-dashed border-neutral-300 p-8 text-center">
+    <div className="rounded-xl border border-dashed border-neutral-300 bg-white p-10 text-center">
       <p className="text-sm text-neutral-600">아직 기록된 근거가 없습니다.</p>
       <p className="mt-1 text-sm text-neutral-500">
         종목을 주문할 때 왜 샀는지를 남기면 여기에 쌓입니다.
       </p>
       <Link
         href="/trade"
-        className="mt-4 inline-block rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700"
+        className="mt-4 inline-block rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
       >
         종목 찾아보기
       </Link>

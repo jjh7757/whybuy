@@ -61,12 +61,12 @@ export function AccountCard() {
 
   if (!account.loggedIn) {
     return (
-      <div className="rounded-lg border border-neutral-200 p-6 text-center">
+      <div className="rounded-xl border border-neutral-200 bg-white p-8 text-center">
         <p className="text-sm text-neutral-600">
-          로그인하면 500만원의 모의 투자금이 주어집니다.
+          로그인하면 내 예산과 주문이 여기에 표시됩니다.
         </p>
         <p className="mt-1 text-sm text-neutral-500">
-          위의 [Google로 계속하기] 버튼을 눌러주세요.
+          오른쪽 위의 [로그인] 버튼을 눌러주세요.
         </p>
       </div>
     );
@@ -75,7 +75,7 @@ export function AccountCard() {
   const usedRate = Math.min(100, (account.spent / account.allocated) * 100);
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-neutral-200 p-4">
+    <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-5">
       <div>
         <div className="grid grid-cols-3 gap-4 text-sm">
           <Stat label="내 모의 투자금" value={won(account.allocated)} />
@@ -91,13 +91,13 @@ export function AccountCard() {
       </div>
 
       {account.holdings.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-neutral-300 p-6 text-center">
+        <div className="rounded-xl border border-dashed border-neutral-300 p-8 text-center">
           <p className="text-sm text-neutral-600">
             아직 이 서비스로 주문한 종목이 없습니다.
           </p>
           <Link
             href="/trade"
-            className="mt-3 inline-block rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700"
+            className="mt-3 inline-block rounded-xl bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-700"
           >
             종목 찾아보기
           </Link>

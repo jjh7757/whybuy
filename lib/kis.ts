@@ -292,6 +292,57 @@ export async function getQuote(stockCode: string) {
   };
 }
 
+type VolumeRankResponse = {
+  output?: Array<{
+    hts_kor_isnm: string; // 종목명
+    mksc_shrn_iscd: string; // 종목코드
+    data_rank: string; // 순위
+    stck_prpr: string; // 현재가
+    prdy_vrss: string; // 전일대비
+    prdy_ctrt: string; // 전일대비율
+    acml_vol: string; // 누적거래량
+    acml_tr_pbmn: string; // 누적거래대금
+  }>;
+};
+
+/**
+ * 거래가 활발한 종목 순위를 한 번의 호출로 가져옵니다.
+ *
+ * 🔴 거래량순이 아니라 **거래대금순**(`FID_BLNG_CLS_CODE=3`)입니다. 거래량순은
+ * 동전주가 상위를 채워 초보자에게 보여줄 목록이 되지 못합니다. 실제로 거래량순
+ * 30건 중 `stocks` 테이블에 있는 종목은 7건뿐이었고, 거래대금순은 21건이었습니다.
+ *
+ * 우선주·ETF·ETN도 제외합니다(`FID_TRGT_EXLS_CLS_CODE`). 지수 추종 상품이
+ * 상위를 점유하면 "지금 사람들이 보는 기업"이라는 목록의 뜻이 사라집니다.
+ */
+export async function getPopularStocks() {
+  const data = (await callKis("/uapi/domestic-stock/v1/quotations/volume-rank", {
+    trId: "FHPST01710000",
+    query: {
+      FID_COND_MRKT_DIV_CODE: "J",
+      FID_COND_SCR_DIV_CODE: "20171",
+      FID_INPUT_ISCD: "0000", // 전체
+      FID_DIV_CLS_CODE: "0",
+      FID_BLNG_CLS_CODE: "3", // 거래금액순
+      FID_TRGT_CLS_CODE: "111111111",
+      FID_TRGT_EXLS_CLS_CODE: "0000101100", // 우선주·ETF·ETN 제외
+      FID_INPUT_PRICE_1: "",
+      FID_INPUT_PRICE_2: "",
+      FID_VOL_CNT: "",
+      FID_INPUT_DATE_1: "",
+    },
+  })) as VolumeRankResponse;
+
+  return (data.output ?? []).map((r) => ({
+    stockCode: r.mksc_shrn_iscd,
+    stockName: r.hts_kor_isnm,
+    price: Number(r.stck_prpr),
+    change: Number(r.prdy_vrss),
+    changeRate: Number(r.prdy_ctrt),
+    tradingValue: Number(r.acml_tr_pbmn), // 누적거래대금(원)
+  }));
+}
+
 // KIS는 짧은 간격의 연속 호출을 EGW00201(초당 거래건수 초과)로 거부합니다.
 // 250ms에서는 멀쩡한 종목도 실패했으므로 400ms + 실패 시 1회 재시도로 걸러냅니다.
 const QUOTE_GAP_MS = 400;

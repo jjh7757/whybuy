@@ -25,16 +25,19 @@ export function AuthButton() {
   }, [supabase]);
 
   if (loading) {
-    return <div className="h-9 w-32 animate-pulse rounded bg-neutral-200" />;
+    return <div className="h-8 w-24 shrink-0 animate-pulse rounded-lg bg-neutral-200" />;
   }
 
   if (user) {
     return (
-      <div className="flex items-center gap-3 text-sm">
-        <span className="text-neutral-600">{user.email}</span>
+      <div className="flex shrink-0 items-center gap-2 text-sm">
+        {/* 좁은 화면에서는 주소가 내비게이션을 밀어냅니다. 로그아웃 버튼만 남깁니다. */}
+        <span className="hidden max-w-40 truncate text-neutral-500 lg:inline">
+          {user.email}
+        </span>
         <button
           onClick={() => supabase.auth.signOut()}
-          className="rounded border border-neutral-300 px-3 py-1.5 hover:bg-neutral-100"
+          className="rounded-lg border border-neutral-200 px-3 py-1.5 font-medium text-neutral-600 transition hover:bg-neutral-100"
         >
           로그아웃
         </button>
@@ -50,9 +53,9 @@ export function AuthButton() {
           options: { redirectTo: `${location.origin}/auth/callback` },
         })
       }
-      className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700"
+      className="shrink-0 rounded-lg bg-neutral-900 px-3.5 py-1.5 text-sm font-medium text-white transition hover:bg-neutral-700"
     >
-      Google로 계속하기
+      로그인
     </button>
   );
 }

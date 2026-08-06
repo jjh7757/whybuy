@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { REASON_TYPES } from "@/lib/rationale";
 import { AiExplain } from "@/components/AiExplain";
+import { PopularStocks } from "@/components/PopularStocks";
 
 type StockOption = { stock_code: string; stock_name: string; market: string };
 type Quote = {
@@ -33,6 +34,15 @@ const won = (n: number) => n.toLocaleString("ko-KR") + "원";
  * AI 해석이 "마이너스는 낮아서 싼 것이 아니다"를 설명하는 쪽을 택했습니다.
  */
 const ratioLabel = (v: number | null) => (v === null ? "—" : `${v}배`);
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-xs text-neutral-500">{label}</div>
+      <div className="tnum truncate font-medium">{value}</div>
+    </div>
+  );
+}
 
 // 예외 2.3: 검색 결과가 0건일 때 보여줄 예시입니다. 실제 stocks 테이블에 있는 종목만 씁니다.
 const EXAMPLES: StockOption[] = [
@@ -169,6 +179,15 @@ export function TradeFlow() {
     }
   }
 
+  // 종목을 하나 고르면 인기 목록이 사라지므로, 되돌아갈 길을 남깁니다.
+  function backToList() {
+    setSelected(null);
+    setQuote(null);
+    setQuoteError(false);
+    setQuery("");
+    setResult(null);
+  }
+
   function selectStock(stock: StockOption) {
     setCandidates(null);
     setNotFound(false);
@@ -259,12 +278,12 @@ export function TradeFlow() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="종목명을 입력하세요 (예: 삼성전자)"
-          className="flex-1 rounded border border-neutral-300 px-3 py-2 text-sm"
+          className="flex-1 rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm outline-none transition placeholder:text-neutral-400 focus:border-neutral-900"
         />
         <button
           type="submit"
           disabled={searching}
-          className="rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50"
+          className="rounded-xl bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-neutral-700 disabled:opacity-50"
         >
           검색
         </button>
@@ -275,15 +294,15 @@ export function TradeFlow() {
       )}
 
       {notFound && (
-        <div className="rounded-lg border border-neutral-200 p-4 text-sm">
+        <div className="rounded-xl border border-neutral-200 bg-white p-4 text-sm">
           <p>코스피 상위 종목만 지원합니다. 다른 종목명으로 검색해보세요.</p>
           <p className="mt-2 text-neutral-500">예시:</p>
-          <div className="mt-1 flex flex-wrap gap-2">
+          <div className="mt-2 flex flex-wrap gap-2">
             {EXAMPLES.map((s) => (
               <button
                 key={s.stock_code}
                 onClick={() => selectStock(s)}
-                className="rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-100"
+                className="rounded-lg border border-neutral-200 px-2.5 py-1 transition hover:bg-neutral-100"
               >
                 {s.stock_name}
               </button>
@@ -293,35 +312,48 @@ export function TradeFlow() {
       )}
 
       {candidates && (
-        <div className="rounded-lg border border-neutral-200 p-4">
+        <div className="rounded-xl border border-neutral-200 bg-white p-4">
           <p className="mb-2 text-sm text-neutral-500">
             결과가 여러 건입니다. 하나를 골라주세요.
           </p>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-0.5">
             {candidates.map((c) => (
               <button
                 key={c.stock_code}
                 onClick={() => selectStock(c)}
-                className="rounded px-2 py-1.5 text-left text-sm hover:bg-neutral-100"
+                className="rounded-lg px-3 py-2 text-left text-sm transition hover:bg-neutral-50"
               >
-                {c.stock_name}{" "}
-                <span className="text-neutral-400">({c.stock_code})</span>
+                <span className="font-medium">{c.stock_name}</span>{" "}
+                <span className="tnum text-neutral-400">({c.stock_code})</span>
               </button>
             ))}
           </div>
         </div>
       )}
 
+      {/* 검색·후보·선택이 모두 없는 첫 상태에서만 인기 종목을 보여줍니다. */}
+      {!selected && !candidates && !notFound && (
+        <PopularStocks onSelect={selectStock} />
+      )}
+
       {selected && (
-        <div className="flex flex-col gap-4 rounded-lg border border-neutral-200 p-4">
-          <h2 className="font-medium">{selected.stock_name}</h2>
+        <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-5">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="text-lg font-bold">{selected.stock_name}</h2>
+            <button
+              onClick={backToList}
+              className="shrink-0 text-sm text-neutral-400 transition hover:text-neutral-900"
+            >
+              목록으로
+            </button>
+          </div>
 
           {quoteError && (
             <div className="flex items-center justify-between text-sm">
               <span className="text-red-600">시세를 불러오지 못했습니다.</span>
               <button
                 onClick={() => fetchQuote(selected.stock_code)}
-                className="rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-100"
+                className="rounded-lg border border-neutral-200 px-2.5 py-1 transition hover:bg-neutral-100"
               >
                 다시 시도
               </button>
@@ -329,52 +361,39 @@ export function TradeFlow() {
           )}
 
           {!quote && !quoteError && (
-            <div className="h-16 animate-pulse rounded bg-neutral-100" />
+            <div className="h-16 animate-pulse rounded-lg bg-neutral-100" />
           )}
 
           {quote && (
             <>
-              <div className="grid grid-cols-3 gap-3 text-sm">
-                <div>
-                  <div className="text-neutral-500">현재가</div>
-                  <div className="font-medium">{won(quote.price)}</div>
-                </div>
-                <div>
-                  <div className="text-neutral-500">전일대비</div>
-                  <div
-                    className={quote.change >= 0 ? "text-red-600" : "text-blue-600"}
-                  >
-                    {won(quote.change)} ({quote.changeRate}%)
-                  </div>
-                </div>
-                <div>
-                  <div className="text-neutral-500">거래량</div>
-                  <div>{quote.volume.toLocaleString("ko-KR")}주</div>
+              <div>
+                <div className="tnum text-3xl font-bold">{won(quote.price)}</div>
+                <div
+                  className={`tnum mt-1 text-sm font-medium ${
+                    quote.change > 0
+                      ? "text-red-600"
+                      : quote.change < 0
+                        ? "text-blue-600"
+                        : "text-neutral-400"
+                  }`}
+                >
+                  {quote.change > 0 ? "+" : ""}
+                  {won(quote.change)} ({quote.changeRate}%)
                 </div>
               </div>
 
-              <div className="grid grid-cols-4 gap-3 rounded bg-neutral-50 p-3 text-sm">
-                <div>
-                  <div className="text-neutral-500">PER</div>
-                  <div>{ratioLabel(quote.per)}</div>
-                </div>
-                <div>
-                  <div className="text-neutral-500">PBR</div>
-                  <div>{ratioLabel(quote.pbr)}</div>
-                </div>
-                <div>
-                  <div className="text-neutral-500">EPS</div>
-                  <div>{quote.eps === null ? "—" : won(quote.eps)}</div>
-                </div>
-                <div>
-                  <div className="text-neutral-500">BPS</div>
-                  <div>{quote.bps === null ? "—" : won(quote.bps)}</div>
-                </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-neutral-50 p-4 text-sm sm:grid-cols-3">
+                <Metric label="거래량" value={`${quote.volume.toLocaleString("ko-KR")}주`} />
+                <Metric label="업종" value={quote.sector} />
+                <Metric label="PER" value={ratioLabel(quote.per)} />
+                <Metric label="PBR" value={ratioLabel(quote.pbr)} />
+                <Metric label="EPS" value={quote.eps === null ? "—" : won(quote.eps)} />
+                <Metric label="BPS" value={quote.bps === null ? "—" : won(quote.bps)} />
               </div>
 
               <AiExplain target="quote" stockCode={selected.stock_code} />
 
-              <hr className="border-neutral-200" />
+              <hr className="border-neutral-100" />
 
               <div className="flex flex-col gap-3">
                 <label className="flex flex-col gap-1 text-sm">
