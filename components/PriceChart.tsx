@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Point = { label: string; close: number };
 type Range = "D" | "W" | "M" | "Y";
@@ -21,6 +21,8 @@ const RANGE_TEXT: Record<Range, { window: string; unit: string }> = {
   Y: { window: "최근 1년", unit: "주" },
 };
 
+const won = (n: number) => n.toLocaleString("ko-KR") + "원";
+
 const W = 600;
 const H = 140;
 const PAD_Y = 8;
@@ -35,10 +37,13 @@ const PAD_Y = 8;
 export function PriceChart({ stockCode }: { stockCode: string }) {
   const [range, setRange] = useState<Range>("D");
   const [points, setPoints] = useState<Point[] | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
     let alive = true;
     setPoints(null);
+    setHoverIndex(null);
     fetch(`/api/chart?code=${stockCode}&period=${range}`)
       .then((r) => r.json())
       .then((d) => alive && setPoints(d.closes ?? []))
@@ -48,6 +53,18 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
     };
     // 종목을 바꿀 때뿐 아니라 구간을 바꿀 때도 다시 받아야 합니다.
   }, [stockCode, range]);
+
+  // 포인터 x좌표를 그 위치에 가장 가까운 데이터 인덱스로 바꿉니다.
+  // 뷰박스(600) 기준이 아니라 SVG가 실제로 그려진 화면 폭을 기준으로 계산해야
+  // 화면 크기·레이아웃이 달라져도 짚은 위치와 표시되는 값이 어긋나지 않습니다.
+  function updateHoverFromClientX(clientX: number, pointCount: number) {
+    const svg = svgRef.current;
+    if (!svg || pointCount < 2) return;
+    const rect = svg.getBoundingClientRect();
+    if (rect.width === 0) return;
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    setHoverIndex(Math.round(ratio * (pointCount - 1)));
+  }
 
   const toggle = (
     <div className="flex gap-1">
@@ -110,34 +127,97 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
   const gradientId = `grad-${stockCode}-${range}`;
   const { window: rangeWindow, unit } = RANGE_TEXT[range];
 
+  const hoverPoint = hoverIndex !== null ? points[hoverIndex] : null;
+  const hoverX = hoverIndex !== null ? x(hoverIndex) : 0;
+  const hoverY = hoverPoint ? y(hoverPoint.close) : 0;
+  // 툴팁이 SVG의 좌우 끝을 넘어가면 잘려 보이므로 8~92% 안으로 눌러둡니다.
+  const hoverPct =
+    hoverIndex !== null
+      ? Math.min(92, Math.max(8, (hoverIndex / (points.length - 1)) * 100))
+      : 0;
+
   return (
     <div>
       <div className="mb-1 flex justify-end">{toggle}</div>
 
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="h-[140px] w-full"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label={`${rangeWindow} 종가 추이. 최저 ${min.toLocaleString("ko-KR")}원, 최고 ${max.toLocaleString("ko-KR")}원.`}
-      >
-        <defs>
-          <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={stroke} stopOpacity="0.16" />
-            <stop offset="100%" stopColor={stroke} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d={area} fill={`url(#${gradientId})`} />
-        <path
-          d={line}
-          fill="none"
-          stroke={stroke}
-          strokeWidth="2"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
+      <div className="relative">
+        {hoverPoint && (
+          <div
+            className="pointer-events-none absolute top-0 z-10 flex -translate-x-1/2 flex-col items-center gap-0.5"
+            style={{ left: `${hoverPct}%` }}
+          >
+            <span className="tnum whitespace-nowrap rounded bg-neutral-900 px-1.5 py-0.5 text-[11px] text-white">
+              {hoverPoint.label}
+            </span>
+            <span className="tnum whitespace-nowrap text-sm font-bold">
+              {won(hoverPoint.close)}
+            </span>
+          </div>
+        )}
+
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${W} ${H}`}
+          className="h-[140px] w-full touch-none"
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={`${rangeWindow} 종가 추이. 최저 ${min.toLocaleString("ko-KR")}원, 최고 ${max.toLocaleString("ko-KR")}원.`}
+          onPointerDown={(e) => {
+            // 포인터 캡처가 실패해도(구형 브라우저 등) 첫 터치 위치 표시는 되어야 합니다.
+            try {
+              e.currentTarget.setPointerCapture(e.pointerId);
+            } catch {
+              // 캡처 없이도 이후 pointermove는 독립적으로 계속 들어옵니다.
+            }
+            updateHoverFromClientX(e.clientX, points.length);
+          }}
+          onPointerMove={(e) => updateHoverFromClientX(e.clientX, points.length)}
+          onPointerUp={() => setHoverIndex(null)}
+          onPointerCancel={() => setHoverIndex(null)}
+          onPointerLeave={() => setHoverIndex(null)}
+        >
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={stroke} stopOpacity="0.16" />
+              <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+            </linearGradient>
+          </defs>
+          <path d={area} fill={`url(#${gradientId})`} />
+          <path
+            d={line}
+            fill="none"
+            stroke={stroke}
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
+          />
+
+          {hoverPoint && (
+            <>
+              <line
+                x1={hoverX}
+                y1={0}
+                x2={hoverX}
+                y2={H}
+                stroke="#9ca3af"
+                strokeWidth="1"
+                strokeDasharray="4,3"
+                vectorEffect="non-scaling-stroke"
+              />
+              <circle
+                cx={hoverX}
+                cy={hoverY}
+                r="4"
+                fill={stroke}
+                stroke="white"
+                strokeWidth="1.5"
+                vectorEffect="non-scaling-stroke"
+              />
+            </>
+          )}
+        </svg>
+      </div>
 
       <div className="mt-1 flex justify-between text-xs text-neutral-400">
         <span>{points[0].label}</span>
