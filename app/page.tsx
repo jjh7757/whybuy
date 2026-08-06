@@ -20,7 +20,7 @@ export default function HomePage() {
 
       <section>
         <h2 className="mb-2 text-sm font-medium text-neutral-500">
-          내 모의계좌
+          내 예산과 주문
         </h2>
         <AccountCard />
       </section>

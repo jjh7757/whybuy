@@ -1,27 +1,38 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { AiExplain } from "@/components/AiExplain";
 
-type Balance = {
-  deposit: number;
-  totalEvaluation: number;
-  totalProfitLoss: number;
-  holdings: Array<{
-    stockCode: string;
-    stockName: string;
-    qty: number;
-    avgPrice: number;
-    evalAmount: number;
-    profitLoss: number;
-    profitLossRate: number;
-  }>;
+type Holding = {
+  stockCode: string;
+  stockName: string;
+  qty: number;
+  avgOrderPrice: number;
+  orderedAmount: number;
+  currentPrice: number | null;
+  evalAmount: number | null;
+  profitLoss: number | null;
+  profitLossRate: number | null;
 };
+
+type Account =
+  | { loggedIn: false }
+  | {
+      loggedIn: true;
+      allocated: number;
+      spent: number;
+      remaining: number;
+      holdings: Holding[];
+      totalEvaluation: number | null;
+      totalProfitLoss: number | null;
+      partialPrices: boolean;
+    };
 
 const won = (n: number) => n.toLocaleString("ko-KR") + "원";
 
 export function AccountCard() {
-  const [balance, setBalance] = useState<Balance | null>(null);
+  const [account, setAccount] = useState<Account | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -31,18 +42,16 @@ export function AccountCard() {
         if (!res.ok) throw new Error((await res.json()).error);
         return res.json();
       })
-      .then(setBalance)
+      .then(setAccount)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
   if (loading) {
-    return (
-      <div className="h-24 animate-pulse rounded-lg bg-neutral-100" />
-    );
+    return <div className="h-24 animate-pulse rounded-lg bg-neutral-100" />;
   }
 
-  if (error || !balance) {
+  if (error || !account) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
         {error ?? "계좌 정보를 불러오지 못했습니다."}
@@ -50,34 +59,115 @@ export function AccountCard() {
     );
   }
 
+  if (!account.loggedIn) {
+    return (
+      <div className="rounded-lg border border-neutral-200 p-6 text-center">
+        <p className="text-sm text-neutral-600">
+          로그인하면 500만원의 모의 투자금이 주어집니다.
+        </p>
+        <p className="mt-1 text-sm text-neutral-500">
+          위의 [Google로 계속하기] 버튼을 눌러주세요.
+        </p>
+      </div>
+    );
+  }
+
+  const usedRate = Math.min(100, (account.spent / account.allocated) * 100);
+
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-neutral-200 p-4">
-      <div className="grid grid-cols-3 gap-4 text-sm">
-        <Stat label="예수금" value={won(balance.deposit)} />
-        <Stat label="총평가금액" value={won(balance.totalEvaluation)} />
-        <Stat
-          label="평가손익"
-          value={won(balance.totalProfitLoss)}
-          tone={balance.totalProfitLoss >= 0 ? "up" : "down"}
-        />
+    <div className="flex flex-col gap-4 rounded-lg border border-neutral-200 p-4">
+      <div>
+        <div className="grid grid-cols-3 gap-4 text-sm">
+          <Stat label="내 모의 투자금" value={won(account.allocated)} />
+          <Stat label="주문에 쓴 금액" value={won(account.spent)} />
+          <Stat label="남은 예산" value={won(account.remaining)} />
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-100">
+          <div
+            className="h-full rounded-full bg-neutral-800"
+            style={{ width: `${usedRate}%` }}
+          />
+        </div>
       </div>
 
-      {balance.holdings.length === 0 ? (
-        <p className="text-sm text-neutral-500">보유 중인 종목이 없습니다.</p>
+      {account.holdings.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-neutral-300 p-6 text-center">
+          <p className="text-sm text-neutral-600">
+            아직 이 서비스로 주문한 종목이 없습니다.
+          </p>
+          <Link
+            href="/trade"
+            className="mt-3 inline-block rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700"
+          >
+            종목 찾아보기
+          </Link>
+        </div>
       ) : (
-        <ul className="flex flex-col gap-2 text-sm">
-          {balance.holdings.map((h) => (
-            <li key={h.stockCode} className="flex justify-between">
-              <span>
-                {h.stockName} · {h.qty}주
-              </span>
-              <span className={h.profitLoss >= 0 ? "text-red-600" : "text-blue-600"}>
-                {won(h.evalAmount)} ({h.profitLossRate.toFixed(2)}%)
-              </span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <Stat
+              label="내 보유 평가액"
+              value={
+                account.totalEvaluation === null
+                  ? "—"
+                  : won(account.totalEvaluation)
+              }
+            />
+            <Stat
+              label="평가손익"
+              value={
+                account.totalProfitLoss === null
+                  ? "—"
+                  : won(account.totalProfitLoss)
+              }
+              tone={
+                account.totalProfitLoss === null
+                  ? undefined
+                  : account.totalProfitLoss >= 0
+                    ? "up"
+                    : "down"
+              }
+            />
+          </div>
+
+          <ul className="flex flex-col gap-2 text-sm">
+            {account.holdings.map((h) => (
+              <li key={h.stockCode} className="flex justify-between gap-2">
+                <span>
+                  {h.stockName} · {h.qty}주
+                  <span className="ml-1 text-neutral-400">
+                    (주문가 {won(h.avgOrderPrice)})
+                  </span>
+                </span>
+                <span
+                  className={
+                    h.profitLoss === null
+                      ? "text-neutral-400"
+                      : h.profitLoss >= 0
+                        ? "text-red-600"
+                        : "text-blue-600"
+                  }
+                >
+                  {h.evalAmount === null
+                    ? "—"
+                    : `${won(h.evalAmount)} (${h.profitLossRate!.toFixed(2)}%)`}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          {account.partialPrices && (
+            <p className="text-xs text-neutral-400">
+              일부 종목의 현재가를 불러오지 못해 —로 표시했습니다.
+            </p>
+          )}
+        </>
       )}
+
+      <p className="text-xs text-neutral-400">
+        수량과 주문가는 이 서비스로 넣은 주문 기준입니다. 시장가 주문이라 실제
+        체결가와 다를 수 있습니다.
+      </p>
 
       <AiExplain target="account" />
     </div>

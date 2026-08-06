@@ -1,61 +1,95 @@
 import { NextResponse } from "next/server";
-import { getAccountBalance, getQuote } from "@/lib/kis";
+import { getQuote, getQuotes } from "@/lib/kis";
 import { generateText, SAFETY_RULES } from "@/lib/gemini";
 import { logEvent } from "@/lib/events";
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getMyPortfolio } from "@/lib/portfolio";
 
 export const dynamic = "force-dynamic";
 
 const won = (n: number) => n.toLocaleString("ko-KR") + "원";
 
-async function buildAccountPrompt() {
-  const b = await getAccountBalance();
+type Built = {
+  prompt: string;
+  event: { name: string; payload: Record<string, unknown> } | null;
+};
 
-  const purchaseAmount = b.holdings.reduce(
-    (sum, h) => sum + h.qty * h.avgPrice,
-    0,
-  );
-  const profitRate = purchaseAmount
-    ? Number(((b.totalProfitLoss / purchaseAmount) * 100).toFixed(2))
-    : 0;
+async function buildAccountPrompt(): Promise<Built | { unauthorized: true }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { unauthorized: true };
 
-  const holdings = b.holdings.length
-    ? b.holdings
-        .map(
-          (h) =>
-            `- ${h.stockName} ${h.qty}주, 평균단가 ${won(Math.round(h.avgPrice))}, 평가손익률 ${h.profitLossRate}%`,
-        )
-        .join("\n")
-    : "- 보유 종목 없음";
+  const p = await getMyPortfolio(supabase, user.id);
 
-  const prompt = `당신은 모의투자를 막 시작한 초보자에게 계좌 화면의 숫자를 설명하는 역할입니다.
+  let holdingsText = "- 아직 주문한 종목이 없습니다.";
+  let totalEval: number | null = null;
+  let profitRate = 0;
+
+  if (p.holdings.length > 0) {
+    const { prices } = await getQuotes(p.holdings.map((h) => h.stockCode));
+    const lines: string[] = [];
+    let evalSum = 0;
+    let orderedSum = 0;
+
+    for (const h of p.holdings) {
+      const price = prices[h.stockCode] ?? null;
+      if (price === null) {
+        lines.push(
+          `- ${h.stockName} ${h.qty}주, 주문가 ${won(Math.round(h.avgOrderPrice))}, 현재가는 조회하지 못함`,
+        );
+        continue;
+      }
+      const amount = price * h.qty;
+      evalSum += amount;
+      orderedSum += h.orderedAmount;
+      const rate = ((amount - h.orderedAmount) / h.orderedAmount) * 100;
+      lines.push(
+        `- ${h.stockName} ${h.qty}주, 주문가 ${won(Math.round(h.avgOrderPrice))} → 현재가 ${won(price)} (${rate.toFixed(2)}%)`,
+      );
+    }
+
+    holdingsText = lines.join("\n");
+    if (orderedSum > 0) {
+      totalEval = evalSum;
+      profitRate = Number((((evalSum - orderedSum) / orderedSum) * 100).toFixed(2));
+    }
+  }
+
+  const prompt = `당신은 모의투자를 막 시작한 초보자에게 화면의 숫자를 설명하는 역할입니다.
 
 ${SAFETY_RULES}
 
-아래는 사용자의 모의투자 계좌 상태입니다.
-- 예수금: ${won(b.deposit)}
-- 총평가금액: ${won(b.totalEvaluation)}
-- 평가손익: ${won(b.totalProfitLoss)}
-보유 종목:
-${holdings}
+아래는 사용자가 이 서비스를 통해 넣은 주문과 남은 가상 예산입니다.
+(공용 모의계좌 전체가 아니라 이 사용자의 몫만 담겨 있습니다.)
+- 지급된 모의 투자금: ${won(p.allocated)}
+- 주문에 쓴 금액: ${won(p.spent)}
+- 남은 예산: ${won(p.remaining)}
+보유 종목(주문 기준):
+${holdingsText}
 
 각 숫자가 무엇을 뜻하는지 초보자가 이해할 수 있게 한국어 3~4문장으로 설명하십시오.
+주문가는 시장가 주문 당시의 가격이라 실제 체결가와 다를 수 있다는 점을 한 번 언급하십시오.
 목록이나 제목 없이 문단 하나로만 쓰십시오.`;
 
   return {
     prompt,
+    // 이벤트 키는 카탈로그(account_diagnosed)를 그대로 쓰되,
+    // deposit은 계좌 예수금이 아니라 이 사용자의 남은 예산을 뜻합니다.
     event: {
       name: "account_diagnosed",
       payload: {
-        deposit: b.deposit,
-        total_eval: b.totalEvaluation,
+        deposit: p.remaining,
+        total_eval: totalEval,
         profit_rate: profitRate,
       },
     },
   };
 }
 
-async function buildQuotePrompt(stockCode: string) {
+async function buildQuotePrompt(stockCode: string): Promise<Built> {
   const q = await getQuote(stockCode);
 
   const supabase = createAdminClient();
@@ -107,12 +141,20 @@ export async function POST(request: Request) {
   }
 
   // 원본 데이터 조회 실패는 AI 실패와 다릅니다. 이건 화면에 숫자조차 없다는 뜻입니다.
-  let built;
+  let built: Built;
   try {
-    built =
+    const result =
       target === "account"
         ? await buildAccountPrompt()
         : await buildQuotePrompt(body.stockCode!);
+
+    if ("unauthorized" in result) {
+      return NextResponse.json(
+        { ok: false, message: "로그인이 필요합니다." },
+        { status: 401 },
+      );
+    }
+    built = result;
   } catch (err) {
     console.error("[/api/ai/explain] 원본 데이터 조회 실패", err);
     return NextResponse.json(

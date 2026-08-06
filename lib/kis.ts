@@ -184,6 +184,55 @@ export async function getQuote(stockCode: string) {
   };
 }
 
+// KIS는 짧은 간격의 연속 호출을 EGW00201(초당 거래건수 초과)로 거부합니다.
+// 250ms에서는 멀쩡한 종목도 실패했으므로 400ms + 실패 시 1회 재시도로 걸러냅니다.
+const QUOTE_GAP_MS = 400;
+const QUOTE_RETRY_BACKOFF_MS = 900;
+// Vercel 함수 제한이 10초이므로 그 전에 남은 종목을 포기합니다.
+const QUOTE_DEADLINE_MS = 7000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 여러 종목의 현재가를 조회합니다. 실패한 종목은 null이 됩니다.
+ *
+ * 🔴 레이트리밋 실패와 "존재하지 않는 종목"은 응답만으로 구분할 수 없으므로
+ * 일단 재시도합니다. 재시도해도 실패할 때만 null로 확정합니다.
+ * 이 구분을 하지 않으면 멀쩡한 종목이 화면에서 `—`로 보입니다.
+ */
+export async function getQuotes(
+  codes: string[],
+): Promise<{ prices: Record<string, number | null>; timedOut: boolean }> {
+  const prices: Record<string, number | null> = {};
+  const startedAt = Date.now();
+  let timedOut = false;
+
+  for (let i = 0; i < codes.length; i++) {
+    const code = codes[i];
+
+    if (Date.now() - startedAt > QUOTE_DEADLINE_MS) {
+      prices[code] = null;
+      timedOut = true;
+      continue;
+    }
+
+    try {
+      prices[code] = (await getQuote(code)).price;
+    } catch {
+      await sleep(QUOTE_RETRY_BACKOFF_MS);
+      try {
+        prices[code] = (await getQuote(code)).price;
+      } catch {
+        prices[code] = null;
+      }
+    }
+
+    if (i < codes.length - 1) await sleep(QUOTE_GAP_MS);
+  }
+
+  return { prices, timedOut };
+}
+
 type BalanceResponse = {
   output1: Array<{
     pdno: string; // 종목코드
