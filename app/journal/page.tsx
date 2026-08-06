@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { AuthButton } from "@/components/AuthButton";
 import { JournalList, type JournalRow } from "@/components/JournalList";
+import { JournalReview } from "@/components/JournalReview";
 
 export const dynamic = "force-dynamic";
 
@@ -102,6 +103,7 @@ async function JournalBody() {
   return (
     <>
       <Summary total={total} withReason={withReason} gut={gut} />
+      <JournalReview />
       <JournalList rows={rows} />
     </>
   );
