@@ -62,7 +62,8 @@ export function PopularStocks({
     <section className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
       <div className="flex items-baseline justify-between border-b border-neutral-100 px-4 py-3">
         <h2 className="font-bold">실시간 인기 종목</h2>
-        <span className="text-xs text-neutral-400">거래대금 순</span>
+        {/* 🔴 "인기"가 좋은 종목이라는 뜻으로 읽히면 추천이 됩니다. 기준을 그대로 적습니다. */}
+        <span className="text-xs text-neutral-400">코스피 거래대금 순</span>
       </div>
 
       {rows === null && (

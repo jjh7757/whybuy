@@ -360,6 +360,10 @@ type VolumeRankResponse = {
  *
  * 우선주·ETF·ETN도 제외합니다(`FID_TRGT_EXLS_CLS_CODE`). 지수 추종 상품이
  * 상위를 점유하면 "지금 사람들이 보는 기업"이라는 목록의 뜻이 사라집니다.
+ *
+ * 🔴 시장을 전체(`0000`)가 아니라 코스피(`0001`)로 좁힙니다. `stocks` 테이블이
+ * 357종목 전부 코스피라, 전체로 받으면 우리가 주문할 수 없는 코스닥 종목이
+ * 30칸 중 아홉 자리를 차지합니다(실측: 전체 21건 일치 vs 코스피 29건 일치).
  */
 export async function getPopularStocks() {
   const data = (await callKis("/uapi/domestic-stock/v1/quotations/volume-rank", {
@@ -367,7 +371,7 @@ export async function getPopularStocks() {
     query: {
       FID_COND_MRKT_DIV_CODE: "J",
       FID_COND_SCR_DIV_CODE: "20171",
-      FID_INPUT_ISCD: "0000", // 전체
+      FID_INPUT_ISCD: "0001", // 코스피
       FID_DIV_CLS_CODE: "0",
       FID_BLNG_CLS_CODE: "3", // 거래금액순
       FID_TRGT_CLS_CODE: "111111111",

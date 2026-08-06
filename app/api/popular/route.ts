@@ -4,9 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-// 화면에 보여줄 상위 종목 수입니다. KIS는 30건을 주지만, 초보자에게 30줄은
-// 다시 "무엇을 눌러야 하는지 모르는" 상태(REQ-05)를 만듭니다.
-const TOP_N = 10;
+// 화면에 보여줄 상위 종목 수입니다. KIS가 주는 30건 중 우리가 지원하는 종목이
+// 보통 29건이므로 사실상 전부입니다. 순위가 붙어 있어 위에서부터 읽으면 되므로
+// 줄 수가 늘어도 "무엇을 눌러야 하는지 모르는" 상태(REQ-05)가 되지는 않습니다.
+const TOP_N = 20;
 
 type Row = {
   stock_code: string;
