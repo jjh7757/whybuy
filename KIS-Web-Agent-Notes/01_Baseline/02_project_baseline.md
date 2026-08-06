@@ -172,8 +172,13 @@ n8n 워크플로우를 웹훅으로 열어 두고 Next.js가 그것을 호출합
 - [x] 아키텍처
 - [x] MVP 범위·완료 기준
 - [x] WBS·마일스톤
-- [ ] 실제 Supabase 테이블명·Vercel URL (Day 1 종료 후 기입)
+- [x] 실제 Supabase 프로젝트: `kis-invest-bot` (`pblhrpsjcssfxmnrjyff`, ap-northeast-2). ⚠️ `.env`가 원래 가리키던 `bitebudget` 프로젝트는 무관한 다른 수업 프로젝트였음 — Day 1에 발견하고 정정
+- [ ] Vercel 배포 URL (배포 후 기입)
 - [ ] 발표자료 (Day 4)
+
+### 🔴 서비스 role key 사용 (기획 대비 변경)
+
+당초 "service role key 미사용"으로 기획했으나(§9, [[../03_Data_Event/01_data_structure|데이터 구조]] §7), 실제 구현 중 `kis_tokens`·`event_logs`처럼 로그인 여부와 무관하게 서버만 써야 하는 테이블은 anon key + RLS만으로 막을 방법이 없다는 것을 확인했습니다. `lib/supabase/admin.ts`에 **서버 전용** service role 클라이언트를 두고 이 두 테이블에만 사용합니다. `orders`·`rationales`·`user_wallets`는 원래 설계대로 사용자 세션(anon key + `auth.uid()` RLS)으로 씁니다.
 
 ---
 
