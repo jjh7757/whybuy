@@ -99,6 +99,8 @@ async function buildQuotePrompt(stockCode: string): Promise<Built> {
     .eq("stock_code", stockCode)
     .maybeSingle();
 
+  const hasMissing = [q.per, q.pbr, q.eps, q.bps].some((v) => v === null);
+
   const prompt = `당신은 모의투자를 막 시작한 초보자에게 종목 시세 화면의 숫자를 설명하는 역할입니다.
 
 ${SAFETY_RULES}
@@ -110,9 +112,16 @@ ${SAFETY_RULES}
 - 시가 ${won(q.open)} / 고가 ${won(q.high)} / 저가 ${won(q.low)}
 - 거래량: ${q.volume.toLocaleString("ko-KR")}주
 - 업종: ${q.sector}
+- PER: ${q.per === null ? "—" : `${q.per}배`}
+- PBR: ${q.pbr === null ? "—" : `${q.pbr}배`}
+- EPS(주당순이익): ${q.eps === null ? "—" : won(q.eps)}
+- BPS(주당순자산): ${q.bps === null ? "—" : won(q.bps)}
 
-각 숫자가 무엇을 뜻하는지 초보자가 이해할 수 있게 한국어 3~4문장으로 설명하십시오.
-이 종목을 사야 하는지 팔아야 하는지는 절대 언급하지 마십시오.
+각 숫자가 무엇을 뜻하는지 초보자가 이해할 수 있게 한국어 4~5문장으로 설명하십시오.
+PER과 PBR은 각각 무엇을 주가와 비교한 값인지 이 종목의 실제 숫자로 풀어서 알려주십시오.
+🔴 지표가 높다·낮다는 사실은 말해도 되지만, 그것이 비싸다·싸다 또는 고평가·저평가라고 단정하지 마십시오.
+   같은 값이라도 업종과 시점에 따라 해석이 달라진다는 점을 반드시 덧붙이십시오.
+${hasMissing ? "값이 없는 지표는 화면에 '—'로 표시되어 있습니다. 왜 비어 있을 수 있는지 짧게만 언급하십시오.\n" : "모든 지표에 값이 있으므로 값이 없는 경우를 가정해 설명하지 마십시오.\n"}이 종목을 사야 하는지 팔아야 하는지는 절대 언급하지 마십시오.
 목록이나 제목 없이 문단 하나로만 쓰십시오.`;
 
   return { prompt, event: null };

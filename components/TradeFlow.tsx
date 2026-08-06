@@ -18,6 +18,10 @@ type Quote = {
   volume: number;
   sector: string;
   market: string;
+  per: number | null;
+  pbr: number | null;
+  eps: number | null;
+  bps: number | null;
 };
 
 const won = (n: number) => n.toLocaleString("ko-KR") + "원";
@@ -338,6 +342,25 @@ export function TradeFlow() {
                 <div>
                   <div className="text-neutral-500">거래량</div>
                   <div>{quote.volume.toLocaleString("ko-KR")}주</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-4 gap-3 rounded bg-neutral-50 p-3 text-sm">
+                <div>
+                  <div className="text-neutral-500">PER</div>
+                  <div>{quote.per === null ? "—" : `${quote.per}배`}</div>
+                </div>
+                <div>
+                  <div className="text-neutral-500">PBR</div>
+                  <div>{quote.pbr === null ? "—" : `${quote.pbr}배`}</div>
+                </div>
+                <div>
+                  <div className="text-neutral-500">EPS</div>
+                  <div>{quote.eps === null ? "—" : won(quote.eps)}</div>
+                </div>
+                <div>
+                  <div className="text-neutral-500">BPS</div>
+                  <div>{quote.bps === null ? "—" : won(quote.bps)}</div>
                 </div>
               </div>
 

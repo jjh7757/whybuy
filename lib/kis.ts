@@ -238,7 +238,18 @@ type QuoteResponse = {
     acml_vol: string; // 누적거래량
     bstp_kor_isnm: string; // 업종명
     rprs_mrkt_kor_name: string; // 대표시장명
+    per: string; // 주가수익비율
+    pbr: string; // 주가순자산비율
+    eps: string; // 주당순이익
+    bps: string; // 주당순자산
   };
+};
+
+// KIS는 지표를 못 주는 종목에도 "0.00"을 채워 보냅니다.
+// 0을 그대로 표시하면 "PER 0배"라는 없는 사실이 되므로 미제공으로 취급합니다.
+const ratio = (v: string | undefined) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n !== 0 ? n : null;
 };
 
 /**
@@ -274,6 +285,10 @@ export async function getQuote(stockCode: string) {
     volume: Number(o.acml_vol),
     sector: o.bstp_kor_isnm,
     market: o.rprs_mrkt_kor_name,
+    per: ratio(o.per),
+    pbr: ratio(o.pbr),
+    eps: ratio(o.eps),
+    bps: ratio(o.bps),
   };
 }
 
