@@ -304,12 +304,33 @@ type DailyChartResponse = {
 };
 
 /**
- * 일봉 종가를 오래된 것부터 반환합니다. 한 번의 호출로 100일치까지 옵니다.
+ * 그래프 구간별 KIS 요청 설정입니다.
+ *
+ * 🔴 `days`는 "얼마나 거슬러 올라가 달라고 할지"입니다. KIS가 한 번에 주는
+ * 봉은 100개까지라, 구간을 늘려 요청해도 그 이상은 오지 않습니다.
+ * 실측 수신량: 일 62개(3개월치 거래일) · 주 100개 · 월 100개 · 년 21개.
+ */
+export const CHART_PERIODS = {
+  D: { days: 90, label: "일" },
+  W: { days: 730, label: "주" },
+  M: { days: 3650, label: "월" },
+  Y: { days: 7300, label: "년" },
+} as const;
+
+export type ChartPeriod = keyof typeof CHART_PERIODS;
+
+export function isChartPeriod(v: string): v is ChartPeriod {
+  return v in CHART_PERIODS;
+}
+
+/**
+ * 구간별 종가를 오래된 것부터 반환합니다.
  *
  * 초보자에게 캔들·이동평균선은 읽을 수 없는 정보입니다. 여기서는 "요즘 오르는
  * 중인지 내리는 중인지"만 보이면 되므로 종가만 씁니다.
  */
-export async function getDailyCloses(stockCode: string, days = 90) {
+export async function getCloses(stockCode: string, period: ChartPeriod = "D") {
+  const { days } = CHART_PERIODS[period];
   const to = new Date();
   const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
   const yyyymmdd = (d: Date) =>
@@ -324,7 +345,7 @@ export async function getDailyCloses(stockCode: string, days = 90) {
         FID_INPUT_ISCD: stockCode,
         FID_INPUT_DATE_1: yyyymmdd(from),
         FID_INPUT_DATE_2: yyyymmdd(to),
-        FID_PERIOD_DIV_CODE: "D",
+        FID_PERIOD_DIV_CODE: period,
         FID_ORG_ADJ_PRC: "0",
       },
     },
