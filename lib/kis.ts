@@ -303,25 +303,30 @@ type DailyChartResponse = {
   }>;
 };
 
+type ChartPoint = { label: string; close: number };
+
 /**
- * 그래프 구간별 KIS 요청 설정입니다.
+ * 그래프 토글 4개는 "봉의 단위"가 아니라 **화면에 보여줄 기간**을 뜻합니다.
+ * (일 = 오늘 하루, 주 = 최근 1주, 월 = 최근 3개월, 년 = 최근 1년)
  *
- * 🔴 `days`는 "얼마나 거슬러 올라가 달라고 할지"입니다. KIS가 한 번에 주는
- * 봉은 100개까지라, 구간을 늘려 요청해도 그 이상은 오지 않습니다.
- * 실측 수신량: 일 62개(3개월치 거래일) · 주 100개 · 월 100개 · 년 21개.
+ * D만 완전히 다른 API(분봉)를 씁니다. 나머지는 같은 일봉 조회 API를 기간·봉
+ * 단위만 바꿔 재사용합니다 — KIS가 한 번에 최대 100개까지만 주므로, "최근 1년"을
+ * 일봉으로 받으면 100거래일(≈5개월)에서 끊깁니다. 그래서 1년은 주봉으로 받습니다.
  */
-export const CHART_PERIODS = {
-  D: { days: 90, label: "일" },
-  W: { days: 730, label: "주" },
-  M: { days: 3650, label: "월" },
-  Y: { days: 7300, label: "년" },
-} as const;
+const RANGE_CONFIG: Record<"W" | "M" | "Y", { days: number; granularity: "D" | "W" }> = {
+  W: { days: 10, granularity: "D" }, // 최근 1주 (일봉)
+  M: { days: 100, granularity: "D" }, // 최근 3개월 (일봉)
+  Y: { days: 370, granularity: "W" }, // 최근 1년 (주봉)
+};
 
-export type ChartPeriod = keyof typeof CHART_PERIODS;
+export type ChartRange = "D" | "W" | "M" | "Y";
 
-export function isChartPeriod(v: string): v is ChartPeriod {
-  return v in CHART_PERIODS;
+export function isChartRange(v: string): v is ChartRange {
+  return v === "D" || v === "W" || v === "M" || v === "Y";
 }
+
+const formatDailyLabel = (yyyymmdd: string) =>
+  `${Number(yyyymmdd.slice(4, 6))}.${Number(yyyymmdd.slice(6, 8))}`;
 
 /**
  * 구간별 종가를 오래된 것부터 반환합니다.
@@ -329,8 +334,10 @@ export function isChartPeriod(v: string): v is ChartPeriod {
  * 초보자에게 캔들·이동평균선은 읽을 수 없는 정보입니다. 여기서는 "요즘 오르는
  * 중인지 내리는 중인지"만 보이면 되므로 종가만 씁니다.
  */
-export async function getCloses(stockCode: string, period: ChartPeriod = "D") {
-  const { days } = CHART_PERIODS[period];
+export async function getCloses(stockCode: string, range: ChartRange): Promise<ChartPoint[]> {
+  if (range === "D") return getIntradayCloses(stockCode);
+
+  const { days, granularity } = RANGE_CONFIG[range];
   const to = new Date();
   const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
   const yyyymmdd = (d: Date) =>
@@ -345,7 +352,7 @@ export async function getCloses(stockCode: string, period: ChartPeriod = "D") {
         FID_INPUT_ISCD: stockCode,
         FID_INPUT_DATE_1: yyyymmdd(from),
         FID_INPUT_DATE_2: yyyymmdd(to),
-        FID_PERIOD_DIV_CODE: period,
+        FID_PERIOD_DIV_CODE: granularity,
         FID_ORG_ADJ_PRC: "0",
       },
     },
@@ -356,7 +363,108 @@ export async function getCloses(stockCode: string, period: ChartPeriod = "D") {
   return (data.output2 ?? [])
     .map((r) => ({ date: r.stck_bsop_date, close: Number(r.stck_clpr) }))
     .filter((r) => r.close > 0)
-    .reverse();
+    .reverse()
+    .map((r) => ({ label: formatDailyLabel(r.date), close: r.close }));
+}
+
+type MinuteChartResponse = {
+  output2?: Array<{
+    stck_cntg_hour: string; // 체결시간 (HHMMSS)
+    stck_prpr: string; // 체결가
+  }>;
+};
+
+const MARKET_OPEN = "090000";
+const MARKET_CLOSE = "153000";
+
+// 30분 페이지를 몇 번 이어붙여야 하루(09:00~15:30, 390분)를 채우는지의 상한입니다.
+// 390 ÷ 30 = 13, 여유를 하나 둡니다.
+const INTRADAY_MAX_PAGES = 14;
+const INTRADAY_GAP_MS = 400;
+const INTRADAY_RETRY_BACKOFF_MS = 900;
+// Vercel 함수 제한(10초) 전에 지금까지 모은 것만 반환합니다.
+const INTRADAY_DEADLINE_MS = 7000;
+
+async function fetchMinutePage(stockCode: string, hour: string) {
+  const data = (await callKis(
+    "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+    {
+      trId: "FHKST03010200",
+      query: {
+        FID_ETC_CLS_CODE: "",
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_INPUT_ISCD: stockCode,
+        FID_INPUT_HOUR_1: hour,
+        FID_PW_DATA_INCU_YN: "Y",
+      },
+    },
+  )) as MinuteChartResponse;
+
+  return (data.output2 ?? [])
+    .map((r) => ({ time: r.stck_cntg_hour, close: Number(r.stck_prpr) }))
+    .filter((r) => r.close > 0);
+}
+
+/**
+ * 오늘 하루의 분봉을 오래된 것부터 반환합니다.
+ *
+ * 🔴 이 API는 한 번에 30분치만 줍니다. 하루 전체를 채우려면 장 마감(15:30)에서
+ * 시작해 **뒤로** 페이지네이션합니다 — 09:00을 직접 요청하면 응답이 불안정했습니다
+ * (실측: 범위가 뒤섞여 나옴). 마감 쪽에서 시작해 각 페이지의 가장 오래된 시각을
+ * 다음 요청의 기준으로 삼는 방식은 4페이지 연속 검증했고 중복·공백이 없었습니다.
+ *
+ * 🔴 우리 쪽 시계로 "아직 개장 전"을 미리 판단하지 않습니다. 모의투자 도메인은
+ * 실제 현재 시각과 무관하게 "오늘"이라는 날짜가 찍힌 하루치 분봉을 이미 들고
+ * 있었습니다(실측: KST 07:27에 15:30까지의 데이터가 정상 응답). 데이터가 있는지는
+ * 항상 장 마감(15:30)을 기준점으로 KIS에 직접 물어보고, 첫 페이지가 비면 그때
+ * "데이터 없음"으로 판단합니다.
+ *
+ * 최악의 경우 13페이지가 필요한데, 실패 시 1회 재시도이므로 최대 26회 호출이
+ * 될 수 있습니다. `EGW00201`(초당 거래건수 초과)에 이미 두 번 걸렸던 밤이라
+ * 7초에서 남은 페이지를 포기하고 그때까지 모은 것만 보여줍니다.
+ */
+export async function getIntradayCloses(stockCode: string): Promise<ChartPoint[]> {
+  let anchor = MARKET_CLOSE;
+  const collected: { time: string; close: number }[] = [];
+  const seen = new Set<string>();
+  const startedAt = Date.now();
+
+  for (let page = 0; page < INTRADAY_MAX_PAGES; page++) {
+    if (Date.now() - startedAt > INTRADAY_DEADLINE_MS) break;
+
+    let rows;
+    try {
+      rows = await fetchMinutePage(stockCode, anchor);
+    } catch {
+      await sleep(INTRADAY_RETRY_BACKOFF_MS);
+      try {
+        rows = await fetchMinutePage(stockCode, anchor);
+      } catch {
+        break; // 이 페이지는 포기하고, 지금까지 모은 것만 반환합니다.
+      }
+    }
+
+    if (rows.length === 0) break;
+    for (const r of rows) {
+      if (!seen.has(r.time)) {
+        seen.add(r.time);
+        collected.push(r);
+      }
+    }
+
+    const oldest = rows[rows.length - 1].time;
+    if (oldest <= MARKET_OPEN) break; // 장 시작까지 다 모았습니다.
+
+    // 가장 오래된 시각의 1분 전을 다음 페이지의 기준으로 삼습니다.
+    const totalMin = Number(oldest.slice(0, 2)) * 60 + Number(oldest.slice(2, 4)) - 1;
+    anchor = `${String(Math.floor(totalMin / 60)).padStart(2, "0")}${String(totalMin % 60).padStart(2, "0")}00`;
+
+    await sleep(INTRADAY_GAP_MS);
+  }
+
+  return collected
+    .sort((a, b) => (a.time < b.time ? -1 : 1))
+    .map((r) => ({ label: `${r.time.slice(0, 2)}:${r.time.slice(2, 4)}`, close: r.close }));
 }
 
 type VolumeRankResponse = {

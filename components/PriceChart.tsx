@@ -2,18 +2,24 @@
 
 import { useEffect, useState } from "react";
 
-type Point = { date: string; close: number };
-type Period = "D" | "W" | "M" | "Y";
+type Point = { label: string; close: number };
+type Range = "D" | "W" | "M" | "Y";
 
-const PERIODS: { value: Period; label: string }[] = [
+const RANGES: { value: Range; label: string }[] = [
   { value: "D", label: "일" },
   { value: "W", label: "주" },
   { value: "M", label: "월" },
   { value: "Y", label: "년" },
 ];
 
-// 구간마다 봉 하나가 나타내는 단위가 달라 "62개"라고만 하면 뜻이 안 옵니다.
-const UNIT: Record<Period, string> = { D: "거래일", W: "주", M: "개월", Y: "년" };
+// 버튼은 "보여줄 기간"이고, 그 기간을 실제로 채우는 봉의 단위는 구간마다 다릅니다.
+// (일=분봉, 주·월=일봉, 년=주봉 — lib/kis.ts의 RANGE_CONFIG와 짝을 맞춥니다)
+const RANGE_TEXT: Record<Range, { window: string; unit: string }> = {
+  D: { window: "오늘", unit: "분" },
+  W: { window: "최근 1주", unit: "거래일" },
+  M: { window: "최근 3개월", unit: "거래일" },
+  Y: { window: "최근 1년", unit: "주" },
+};
 
 const W = 600;
 const H = 140;
@@ -27,13 +33,13 @@ const PAD_Y = 8;
  * "요즘 오르는 중인지 내리는 중인지" 한 가지만 전달합니다.
  */
 export function PriceChart({ stockCode }: { stockCode: string }) {
-  const [period, setPeriod] = useState<Period>("D");
+  const [range, setRange] = useState<Range>("D");
   const [points, setPoints] = useState<Point[] | null>(null);
 
   useEffect(() => {
     let alive = true;
     setPoints(null);
-    fetch(`/api/chart?code=${stockCode}&period=${period}`)
+    fetch(`/api/chart?code=${stockCode}&period=${range}`)
       .then((r) => r.json())
       .then((d) => alive && setPoints(d.closes ?? []))
       .catch(() => alive && setPoints([]));
@@ -41,23 +47,23 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
       alive = false;
     };
     // 종목을 바꿀 때뿐 아니라 구간을 바꿀 때도 다시 받아야 합니다.
-  }, [stockCode, period]);
+  }, [stockCode, range]);
 
   const toggle = (
     <div className="flex gap-1">
-      {PERIODS.map((p) => (
+      {RANGES.map((r) => (
         <button
-          key={p.value}
+          key={r.value}
           type="button"
-          onClick={() => setPeriod(p.value)}
-          aria-pressed={period === p.value}
+          onClick={() => setRange(r.value)}
+          aria-pressed={range === r.value}
           className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-            period === p.value
+            range === r.value
               ? "bg-neutral-900 text-white"
               : "text-neutral-400 hover:bg-neutral-100"
           }`}
         >
-          {p.label}
+          {r.label}
         </button>
       ))}
     </div>
@@ -79,7 +85,9 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
       <div>
         <div className="mb-1 flex justify-end">{toggle}</div>
         <p className="py-8 text-center text-sm text-neutral-400">
-          이 구간은 보여줄 데이터가 없습니다.
+          {range === "D"
+            ? "장이 열리면 오늘의 그래프가 보입니다."
+            : "이 구간은 보여줄 데이터가 없습니다."}
         </p>
       </div>
     );
@@ -99,7 +107,8 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
 
   const rising = values[values.length - 1] >= values[0];
   const stroke = rising ? "#dc2626" : "#2563eb";
-  const gradientId = `grad-${stockCode}-${period}`;
+  const gradientId = `grad-${stockCode}-${range}`;
+  const { window: rangeWindow, unit } = RANGE_TEXT[range];
 
   return (
     <div>
@@ -110,7 +119,7 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
         className="h-[140px] w-full"
         preserveAspectRatio="none"
         role="img"
-        aria-label={`최근 ${points.length}${UNIT[period]} 종가 추이. 최저 ${min.toLocaleString("ko-KR")}원, 최고 ${max.toLocaleString("ko-KR")}원.`}
+        aria-label={`${rangeWindow} 종가 추이. 최저 ${min.toLocaleString("ko-KR")}원, 최고 ${max.toLocaleString("ko-KR")}원.`}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -131,18 +140,13 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
       </svg>
 
       <div className="mt-1 flex justify-between text-xs text-neutral-400">
-        <span>{formatDate(points[0].date)}</span>
+        <span>{points[0].label}</span>
         <span className="tnum">
-          최근 {points.length}
-          {UNIT[period]} · {min.toLocaleString("ko-KR")}~
-          {max.toLocaleString("ko-KR")}원
+          {rangeWindow} · {points.length}
+          {unit} · {min.toLocaleString("ko-KR")}~{max.toLocaleString("ko-KR")}원
         </span>
-        <span>{formatDate(points[points.length - 1].date)}</span>
+        <span>{points[points.length - 1].label}</span>
       </div>
     </div>
   );
-}
-
-function formatDate(yyyymmdd: string) {
-  return `${Number(yyyymmdd.slice(4, 6))}.${Number(yyyymmdd.slice(6, 8))}`;
 }
