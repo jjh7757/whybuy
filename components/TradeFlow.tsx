@@ -26,6 +26,16 @@ type Quote = {
 
 const won = (n: number) => n.toLocaleString("ko-KR") + "원";
 
+/**
+ * PER·PBR을 표시합니다.
+ *
+ * 🔴 음수는 배수로 쓰지 않습니다. 적자 기업의 PER은 주가를 마이너스 이익으로 나눈
+ * 계산상의 부산물이라 "몇 배"로 읽을 수 없는데, 초보자에게는 마이너스가 곧
+ * "아주 낮다 = 싸다"로 보여 뜻이 정반대로 전달됩니다. 값 대신 사유를 표시합니다.
+ */
+const ratioLabel = (v: number | null, negativeLabel: string) =>
+  v === null ? "—" : v < 0 ? negativeLabel : `${v}배`;
+
 // 예외 2.3: 검색 결과가 0건일 때 보여줄 예시입니다. 실제 stocks 테이블에 있는 종목만 씁니다.
 const EXAMPLES: StockOption[] = [
   { stock_code: "005930", stock_name: "삼성전자", market: "KOSPI" },
@@ -348,11 +358,11 @@ export function TradeFlow() {
               <div className="grid grid-cols-4 gap-3 rounded bg-neutral-50 p-3 text-sm">
                 <div>
                   <div className="text-neutral-500">PER</div>
-                  <div>{quote.per === null ? "—" : `${quote.per}배`}</div>
+                  <div>{ratioLabel(quote.per, "적자")}</div>
                 </div>
                 <div>
                   <div className="text-neutral-500">PBR</div>
-                  <div>{quote.pbr === null ? "—" : `${quote.pbr}배`}</div>
+                  <div>{ratioLabel(quote.pbr, "자본잠식")}</div>
                 </div>
                 <div>
                   <div className="text-neutral-500">EPS</div>
