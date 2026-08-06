@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/client";
 import { REASON_TYPES } from "@/lib/rationale";
 import { AiExplain } from "@/components/AiExplain";
 import { PopularStocks } from "@/components/PopularStocks";
+import { PriceChart } from "@/components/PriceChart";
+import { RangeBar } from "@/components/RangeBar";
 
 type StockOption = { stock_code: string; stock_name: string; market: string };
 type Quote = {
@@ -23,6 +25,8 @@ type Quote = {
   pbr: number | null;
   eps: number | null;
   bps: number | null;
+  week52High: number | null;
+  week52Low: number | null;
 };
 
 const won = (n: number) => n.toLocaleString("ko-KR") + "원";
@@ -197,6 +201,9 @@ export function TradeFlow() {
     setReasonMemo("");
     setResult(null);
     fetchQuote(stock.stock_code);
+    // 수량 퀵버튼이 남은 예산을 기준으로 계산하므로 미리 받아둡니다.
+    // KIS를 부르지 않는 요청이라 시세 조회와 겹쳐도 한도에 영향이 없습니다.
+    if (userId) fetchRemaining();
   }
 
   const qtyNum = Number(qty);
@@ -204,15 +211,22 @@ export function TradeFlow() {
   const expectedAmount = validQty && quote ? qtyNum * quote.price : 0;
   const canSubmit = validQty && reasonType !== "" && quote !== null;
 
-  async function openConfirm() {
-    setResult(null);
+  async function fetchRemaining() {
     try {
-      const res = await fetch("/api/account");
+      const res = await fetch("/api/budget");
       const data = await res.json();
-      setRemaining(data.loggedIn ? data.remaining : null);
+      const value = data.loggedIn ? data.remaining : null;
+      setRemaining(value);
+      return value as number | null;
     } catch {
       setRemaining(null);
+      return null;
     }
+  }
+
+  async function openConfirm() {
+    setResult(null);
+    await fetchRemaining();
     setConfirming(true);
   }
 
@@ -337,65 +351,108 @@ export function TradeFlow() {
       )}
 
       {selected && (
-        <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-5">
-          <div className="flex items-baseline justify-between gap-3">
-            <h2 className="text-lg font-bold">{selected.stock_name}</h2>
-            <button
-              onClick={backToList}
-              className="shrink-0 text-sm text-neutral-400 transition hover:text-neutral-900"
-            >
-              목록으로
-            </button>
-          </div>
-
-          {quoteError && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-red-600">시세를 불러오지 못했습니다.</span>
+        <div className="grid items-start gap-4 lg:grid-cols-[1fr_20rem]">
+          {/* 왼쪽: 이 종목이 어떤 상태인가 */}
+          <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold">{selected.stock_name}</h2>
+                <span className="tnum text-xs text-neutral-400">
+                  {selected.stock_code}
+                  {selected.market ? ` · ${selected.market}` : ""}
+                </span>
+              </div>
               <button
-                onClick={() => fetchQuote(selected.stock_code)}
-                className="rounded-lg border border-neutral-200 px-2.5 py-1 transition hover:bg-neutral-100"
+                onClick={backToList}
+                className="shrink-0 text-sm text-neutral-400 transition hover:text-neutral-900"
               >
-                다시 시도
+                목록으로
               </button>
             </div>
-          )}
 
-          {!quote && !quoteError && (
-            <div className="h-16 animate-pulse rounded-lg bg-neutral-100" />
-          )}
-
-          {quote && (
-            <>
-              <div>
-                <div className="tnum text-3xl font-bold">{won(quote.price)}</div>
-                <div
-                  className={`tnum mt-1 text-sm font-medium ${
-                    quote.change > 0
-                      ? "text-red-600"
-                      : quote.change < 0
-                        ? "text-blue-600"
-                        : "text-neutral-400"
-                  }`}
+            {quoteError && (
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-red-600">시세를 불러오지 못했습니다.</span>
+                <button
+                  onClick={() => fetchQuote(selected.stock_code)}
+                  className="rounded-lg border border-neutral-200 px-2.5 py-1 transition hover:bg-neutral-100"
                 >
-                  {quote.change > 0 ? "+" : ""}
-                  {won(quote.change)} ({quote.changeRate}%)
+                  다시 시도
+                </button>
+              </div>
+            )}
+
+            {!quote && !quoteError && (
+              <div className="h-16 animate-pulse rounded-lg bg-neutral-100" />
+            )}
+
+            {quote && (
+              <>
+                <div>
+                  <div className="tnum text-3xl font-bold">{won(quote.price)}</div>
+                  <div
+                    className={`tnum mt-1 text-sm font-medium ${
+                      quote.change > 0
+                        ? "text-red-600"
+                        : quote.change < 0
+                          ? "text-blue-600"
+                          : "text-neutral-400"
+                    }`}
+                  >
+                    {quote.change > 0 ? "+" : ""}
+                    {won(quote.change)} ({quote.changeRate}%)
+                  </div>
                 </div>
+
+                <PriceChart stockCode={selected.stock_code} />
+
+                <div className="flex flex-col gap-3">
+                  <RangeBar
+                    label="오늘 범위"
+                    low={quote.low}
+                    high={quote.high}
+                    current={quote.price}
+                  />
+                  {quote.week52Low !== null && quote.week52High !== null && (
+                    <RangeBar
+                      label="52주 범위"
+                      low={quote.week52Low}
+                      high={quote.week52High}
+                      current={quote.price}
+                    />
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-neutral-50 p-4 text-sm sm:grid-cols-3">
+                  <Metric label="시가" value={won(quote.open)} />
+                  <Metric
+                    label="거래량"
+                    value={`${quote.volume.toLocaleString("ko-KR")}주`}
+                  />
+                  <Metric label="업종" value={quote.sector} />
+                  <Metric label="PER" value={ratioLabel(quote.per)} />
+                  <Metric label="PBR" value={ratioLabel(quote.pbr)} />
+                  <Metric label="EPS" value={quote.eps === null ? "—" : won(quote.eps)} />
+                </div>
+
+                <AiExplain target="quote" stockCode={selected.stock_code} />
+              </>
+            )}
+          </div>
+
+          {/* 오른쪽: 얼마나, 왜 살 것인가 */}
+          {quote && (
+            <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-5 lg:sticky lg:top-20">
+              <div className="flex items-baseline justify-between">
+                <h3 className="font-bold">주문</h3>
+                {remaining !== null && (
+                  <span className="tnum text-xs text-neutral-400">
+                    남은 예산 {won(remaining)}
+                  </span>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-neutral-50 p-4 text-sm sm:grid-cols-3">
-                <Metric label="거래량" value={`${quote.volume.toLocaleString("ko-KR")}주`} />
-                <Metric label="업종" value={quote.sector} />
-                <Metric label="PER" value={ratioLabel(quote.per)} />
-                <Metric label="PBR" value={ratioLabel(quote.pbr)} />
-                <Metric label="EPS" value={quote.eps === null ? "—" : won(quote.eps)} />
-                <Metric label="BPS" value={quote.bps === null ? "—" : won(quote.bps)} />
-              </div>
-
-              <AiExplain target="quote" stockCode={selected.stock_code} />
-
-              <hr className="border-neutral-100" />
-
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="text-neutral-500">수량</span>
                   <input
@@ -403,62 +460,95 @@ export function TradeFlow() {
                     min={1}
                     value={qty}
                     onChange={(e) => setQty(e.target.value)}
-                    className="w-32 rounded border border-neutral-300 px-2 py-1.5"
-                  />
-                  {qty.trim() !== "" && !validQty && (
-                    <span className="text-xs text-red-600">
-                      1주 이상의 정수로 입력해주세요.
-                    </span>
-                  )}
-                  {validQty && (
-                    <span className="text-xs text-neutral-500">
-                      예상 주문금액 {won(expectedAmount)}
-                    </span>
-                  )}
-                </label>
-
-                <fieldset className="flex flex-col gap-1.5 text-sm">
-                  <legend className="mb-1 text-neutral-500">
-                    이 종목을 사려는 근거는 무엇인가요?
-                  </legend>
-                  {REASON_TYPES.map((r) => (
-                    <label key={r.value} className="flex items-center gap-2">
-                      <input
-                        type="radio"
-                        name="reasonType"
-                        value={r.value}
-                        checked={reasonType === r.value}
-                        onChange={() => setReasonType(r.value)}
-                      />
-                      {r.label}
-                    </label>
-                  ))}
-                  {reasonType === "" && (
-                    <span className="text-xs text-neutral-400">
-                      근거를 선택해야 주문할 수 있습니다.
-                    </span>
-                  )}
-                </fieldset>
-
-                <label className="flex flex-col gap-1 text-sm">
-                  <span className="text-neutral-500">메모 (선택)</span>
-                  <textarea
-                    value={reasonMemo}
-                    onChange={(e) => setReasonMemo(e.target.value)}
-                    rows={2}
-                    className="rounded border border-neutral-300 px-2 py-1.5"
+                    placeholder="0"
+                    className="tnum w-full rounded-xl border border-neutral-200 px-3 py-2 text-right text-lg font-medium outline-none transition focus:border-neutral-900"
                   />
                 </label>
 
-                <button
-                  onClick={handleOrderClick}
-                  disabled={!canSubmit}
-                  className="self-start rounded bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  주문하기
-                </button>
+                {/* 남은 예산으로 몇 주까지 살 수 있는지 초보자가 직접 나눌 필요가 없게 합니다. */}
+                {remaining !== null && (
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[10, 25, 50, 100].map((pct) => {
+                      const affordable = Math.floor((remaining * (pct / 100)) / quote.price);
+                      return (
+                        <button
+                          key={pct}
+                          type="button"
+                          disabled={affordable < 1}
+                          onClick={() => setQty(String(affordable))}
+                          className="rounded-lg border border-neutral-200 py-1.5 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {pct === 100 ? "최대" : `${pct}%`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {qty.trim() !== "" && !validQty && (
+                  <span className="text-xs text-red-600">
+                    1주 이상의 정수로 입력해주세요.
+                  </span>
+                )}
               </div>
-            </>
+
+              <div className="flex items-baseline justify-between border-y border-neutral-100 py-3">
+                <span className="text-sm text-neutral-500">예상 주문금액</span>
+                <span className="tnum font-bold">
+                  {validQty ? won(expectedAmount) : "—"}
+                </span>
+              </div>
+
+              <fieldset className="flex flex-col gap-1 text-sm">
+                <legend className="mb-1.5 font-medium">
+                  이 종목을 사려는 근거는 무엇인가요?
+                </legend>
+                {REASON_TYPES.map((r) => (
+                  <label
+                    key={r.value}
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 transition ${
+                      reasonType === r.value ? "bg-neutral-100" : "hover:bg-neutral-50"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="reasonType"
+                      value={r.value}
+                      checked={reasonType === r.value}
+                      onChange={() => setReasonType(r.value)}
+                    />
+                    {r.label}
+                  </label>
+                ))}
+              </fieldset>
+
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-neutral-500">메모 (선택)</span>
+                <textarea
+                  value={reasonMemo}
+                  onChange={(e) => setReasonMemo(e.target.value)}
+                  rows={2}
+                  className="rounded-xl border border-neutral-200 px-3 py-2 outline-none transition focus:border-neutral-900"
+                />
+              </label>
+
+              <button
+                onClick={handleOrderClick}
+                disabled={!canSubmit}
+                className="w-full rounded-xl bg-red-600 py-3 font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-neutral-400"
+              >
+                주문하기
+              </button>
+
+              {/* 🔴 버튼을 왜 못 누르는지 말해주지 않으면 사용자는 고장으로 봅니다. */}
+              {!canSubmit && (
+                <p className="-mt-2 text-center text-xs text-neutral-400">
+                  {!validQty
+                    ? "수량을 입력해주세요."
+                    : "근거를 선택해야 주문할 수 있습니다."}
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}

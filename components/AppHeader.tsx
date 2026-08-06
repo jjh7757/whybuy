@@ -13,10 +13,21 @@ const NAV = [
  * 화면 사이 이동을 첫 화면의 카드 3개에만 두면, 다른 화면에 들어간 뒤에는
  * 뒤로 가기 말고는 길이 없습니다(REQ-05). 머리말에 같은 3개를 항상 둡니다.
  */
-export function AppHeader({ current }: { current: string }) {
+export function AppHeader({
+  current,
+  wide = false,
+}: {
+  current: string;
+  /** 본문이 넓은 화면(종목 상세)에서 머리말이 본문과 어긋나지 않게 맞춥니다. */
+  wide?: boolean;
+}) {
   return (
     <header className="sticky top-0 z-10 border-b border-neutral-200 bg-white/90 backdrop-blur">
-      <div className="mx-auto flex w-full max-w-3xl items-center gap-6 px-5 py-3 sm:px-8">
+      <div
+        className={`mx-auto flex w-full items-center gap-6 px-5 py-3 sm:px-8 ${
+          wide ? "max-w-5xl" : "max-w-3xl"
+        }`}
+      >
         <Link href="/" className="shrink-0 font-bold tracking-tight">
           왜샀어
         </Link>

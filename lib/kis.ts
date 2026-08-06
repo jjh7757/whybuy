@@ -242,6 +242,8 @@ type QuoteResponse = {
     pbr: string; // 주가순자산비율
     eps: string; // 주당순이익
     bps: string; // 주당순자산
+    w52_hgpr: string; // 52주 최고가
+    w52_lwpr: string; // 52주 최저가
   };
 };
 
@@ -289,7 +291,51 @@ export async function getQuote(stockCode: string) {
     pbr: ratio(o.pbr),
     eps: ratio(o.eps),
     bps: ratio(o.bps),
+    week52High: ratio(o.w52_hgpr),
+    week52Low: ratio(o.w52_lwpr),
   };
+}
+
+type DailyChartResponse = {
+  output2?: Array<{
+    stck_bsop_date: string; // 영업일자 (YYYYMMDD)
+    stck_clpr: string; // 종가
+  }>;
+};
+
+/**
+ * 일봉 종가를 오래된 것부터 반환합니다. 한 번의 호출로 100일치까지 옵니다.
+ *
+ * 초보자에게 캔들·이동평균선은 읽을 수 없는 정보입니다. 여기서는 "요즘 오르는
+ * 중인지 내리는 중인지"만 보이면 되므로 종가만 씁니다.
+ */
+export async function getDailyCloses(stockCode: string, days = 90) {
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
+  const yyyymmdd = (d: Date) =>
+    `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
+
+  const data = (await callKis(
+    "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+    {
+      trId: "FHKST03010100",
+      query: {
+        FID_COND_MRKT_DIV_CODE: "J",
+        FID_INPUT_ISCD: stockCode,
+        FID_INPUT_DATE_1: yyyymmdd(from),
+        FID_INPUT_DATE_2: yyyymmdd(to),
+        FID_PERIOD_DIV_CODE: "D",
+        FID_ORG_ADJ_PRC: "0",
+      },
+    },
+  )) as DailyChartResponse;
+
+  // KIS는 최신순으로 줍니다. 그래프는 왼쪽이 과거여야 하므로 뒤집습니다.
+  // 휴장일에는 종가가 0인 행이 섞여 들어와 선이 바닥으로 꺾입니다.
+  return (data.output2 ?? [])
+    .map((r) => ({ date: r.stck_bsop_date, close: Number(r.stck_clpr) }))
+    .filter((r) => r.close > 0)
+    .reverse();
 }
 
 type VolumeRankResponse = {
