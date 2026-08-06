@@ -35,7 +35,7 @@
 
 | # | 이벤트 | 발생 시점 | `payload` |
 |---:|---|---|---|
-| 1 | `account_diagnosed` | AI-1이 계좌를 해석함 | `{ deposit, total_eval, profit_rate }` |
+| 1 | `account_diagnosed` | AI-1이 계좌를 해석함 | `{ deposit, total_eval, profit_rate }` 🔄 `deposit`은 실제 계좌 예수금이 아니라 **이 사용자의 남은 가상 예산**입니다. 계좌 화면이 공용 KIS 잔고 대신 로그인 사용자가 이 서비스로 주문한 종목 기준으로 바뀌었기 때문입니다 (2026-08-06, [[../02_Domain/03_workflow|업무 흐름]] 흐름 B). |
 | 2 | `quote_retrieved` | 종목 시세를 조회함 | `{ stock_code, price, change_rate }` |
 | 3 | `order_submitted` | KIS에 주문이 접수됨 | `{ stock_code, qty, expected_price, order_no }` |
 | 4 | `order_rejected` | 주문이 거부됨 | `{ stock_code, qty, reason }` |
