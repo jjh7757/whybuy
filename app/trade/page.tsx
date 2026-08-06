@@ -1,10 +1,25 @@
+import Link from "next/link";
+import { AuthButton } from "@/components/AuthButton";
+import { TradeFlow } from "@/components/TradeFlow";
+
 export default function TradePage() {
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 p-6 sm:p-10">
-      <h1 className="text-lg font-semibold">종목 찾아보기</h1>
-      <p className="text-sm text-neutral-500">
-        준비 중입니다. Day 2에 종목 검색·시세·주문 기능이 여기에 들어갑니다.
-      </p>
+    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 p-6 sm:p-10">
+      <header className="flex items-center justify-between">
+        <Link href="/" className="text-lg font-semibold">
+          왜샀어 · WhyBuy
+        </Link>
+        <AuthButton />
+      </header>
+
+      <div>
+        <h1 className="text-xl font-semibold">종목 찾아보기</h1>
+        <p className="mt-1 text-sm text-neutral-500">
+          시세를 확인하고 근거를 남기며 주문합니다.
+        </p>
+      </div>
+
+      <TradeFlow />
     </main>
   );
 }

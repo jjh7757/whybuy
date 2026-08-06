@@ -91,6 +91,7 @@ type KisCallOptions = {
   query?: Record<string, string>;
   method?: "GET" | "POST";
   body?: unknown;
+  hashkey?: string;
 };
 
 /**
@@ -117,6 +118,7 @@ export async function callKis(
       appsecret: APP_SECRET,
       tr_id: options.trId,
       custtype: "P",
+      ...(options.hashkey ? { hashkey: options.hashkey } : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
@@ -132,6 +134,97 @@ export async function callKis(
   }
 
   return res.json();
+}
+
+/** rt_cd가 아닌 필드로는 KIS 응답의 성공 여부를 알 수 없습니다. 0이 성공입니다. */
+type KisResultEnvelope = {
+  rt_cd: string;
+  msg_cd: string;
+  msg1: string;
+};
+
+type PsblOrderResponse = KisResultEnvelope & {
+  output?: { ord_psbl_cash: string };
+};
+
+/**
+ * 주문가능현금을 조회합니다(가상 예산이 아니라 실제 계좌 예수금 기준, 예외 2.5용).
+ *
+ * 🔴 `max_buy_qty`는 증거금률(20%)이 반영돼 실제 현금보다 훨씬 큰 값이 나옵니다.
+ * 예산 검증에는 반드시 `ord_psbl_cash`(주문가능현금)만 씁니다.
+ */
+export async function getBuyableCash(stockCode: string): Promise<number> {
+  const data = (await callKis(
+    "/uapi/domestic-stock/v1/trading/inquire-psbl-order",
+    {
+      trId: "VTTC8908R",
+      query: {
+        CANO: process.env.KIS_ACCOUNT_NO!,
+        ACNT_PRDT_CD: process.env.KIS_ACCOUNT_PRODUCT_CODE!,
+        PDNO: stockCode,
+        ORD_UNPR: "0",
+        ORD_DVSN: "01",
+        CMA_EVLU_AMT_ICLD_YN: "N",
+        OVRS_ICLD_YN: "N",
+      },
+    },
+  )) as PsblOrderResponse;
+
+  if (data.rt_cd !== "0" || !data.output) {
+    throw new Error(`매수가능조회 실패: ${data.msg1?.trim()}`);
+  }
+  return Number(data.output.ord_psbl_cash);
+}
+
+type OrderResponse = KisResultEnvelope & {
+  output?: { ODNO: string; ORD_TMD: string };
+};
+
+/**
+ * 국내주식 시장가 매수주문을 넣습니다(모의투자, 예외 2.8용).
+ *
+ * 🔴 hashkey를 붙인 조합으로 실주문 성공을 검증했습니다(2026-08-06 15:16 KST,
+ * 주문번호 0000041001). hashkey 없이도 되는지는 확인하지 않았으므로 그대로 둡니다.
+ *
+ * rt_cd !== "0"이면 throw합니다. HTTP 상태는 200이라 callKis의 !res.ok 분기로는
+ * 걸러지지 않고, 반드시 이 함수가 rt_cd를 직접 검사해야 합니다.
+ */
+export async function placeBuyOrder(
+  stockCode: string,
+  qty: number,
+): Promise<{ orderNo: string; orderTime: string }> {
+  const body = {
+    CANO: process.env.KIS_ACCOUNT_NO!,
+    ACNT_PRDT_CD: process.env.KIS_ACCOUNT_PRODUCT_CODE!,
+    PDNO: stockCode,
+    ORD_DVSN: "01", // 시장가
+    ORD_QTY: String(qty),
+    ORD_UNPR: "0",
+  };
+
+  const hashRes = await fetch(`${BASE_URL}/uapi/hashkey`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      appkey: APP_KEY,
+      appsecret: APP_SECRET,
+    },
+    body: JSON.stringify(body),
+  });
+  const hash = hashRes.ok ? ((await hashRes.json()) as { HASH?: string }).HASH : undefined;
+
+  const data = (await callKis("/uapi/domestic-stock/v1/trading/order-cash", {
+    trId: "VTTC0802U",
+    method: "POST",
+    body,
+    hashkey: hash,
+  })) as OrderResponse;
+
+  if (data.rt_cd !== "0" || !data.output) {
+    throw new Error(data.msg1?.trim() || `주문 실패 (${data.msg_cd})`);
+  }
+
+  return { orderNo: data.output.ODNO, orderTime: data.output.ORD_TMD };
 }
 
 type QuoteResponse = {
