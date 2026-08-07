@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { REASON_TYPES } from "@/lib/rationale";
 import { AiExplain } from "@/components/AiExplain";
 import { DividendInfo } from "@/components/DividendInfo";
+import { FinancialRatios } from "@/components/FinancialRatios";
 import { PopularStocks } from "@/components/PopularStocks";
 import { PriceChart } from "@/components/PriceChart";
 import { RangeBar } from "@/components/RangeBar";
@@ -441,6 +442,11 @@ export function TradeFlow() {
                 </div>
 
                 <AiExplain target="quote" stockCode={selected.stock_code} />
+
+                <div>
+                  <h3 className="mb-2 text-sm font-bold">재무</h3>
+                  <FinancialRatios stockCode={selected.stock_code} />
+                </div>
 
                 <div>
                   <h3 className="mb-2 text-sm font-bold">배당 정보</h3>

@@ -387,6 +387,61 @@ export async function getDividends(stockCode: string): Promise<Dividend[]> {
     .sort((a, b) => (a.recordDate < b.recordDate ? 1 : -1));
 }
 
+type FinancialRatioResponse = {
+  output?: Array<{
+    stac_yymm: string; // 결산연월 (YYYYMM)
+    grs: string; // 매출액증가율(%)
+    ntin_inrt: string; // 순이익증가율(%)
+    roe_val: string; // ROE(%)
+    lblt_rate: string; // 부채비율(%)
+  }>;
+};
+
+export type FinancialRatio = {
+  period: string;
+  revenueGrowth: number | null;
+  netIncomeGrowth: number | null;
+  roe: number | null;
+  debtRatio: number | null;
+};
+
+const formatYm = (yyyymm: string) =>
+  yyyymm.length === 6 ? `${yyyymm.slice(0, 4)}.${yyyymm.slice(4, 6)}` : yyyymm;
+
+const toRatioNum = (v: string | undefined) => {
+  const n = Number(v);
+  return v !== undefined && Number.isFinite(n) ? n : null;
+};
+
+/**
+ * 최근 결산연도별 재무비율을 최신순으로 반환합니다(국내주식 재무비율, FHKST66430300).
+ *
+ * 🔴 실측으로 확인: `search-stock-info`(기업개요)와 달리 이 TR은 모의투자에서
+ * 그대로 동작한다("모의투자 TR이 아닙니다" 거부 없음). 쿼리 파라미터명은 다른
+ * 엔드포인트와 달리 소문자(fid_input_iscd 등)로 확인됐다.
+ */
+export async function getFinancialRatios(stockCode: string): Promise<FinancialRatio[]> {
+  const data = (await callKis("/uapi/domestic-stock/v1/finance/financial-ratio", {
+    trId: "FHKST66430300",
+    query: {
+      fid_input_iscd: stockCode,
+      fid_div_cls_code: "0",
+      fid_cond_mrkt_div_code: "J",
+    },
+  })) as FinancialRatioResponse;
+
+  return (data.output ?? [])
+    .filter((r) => r.stac_yymm)
+    .map((r) => ({
+      period: formatYm(r.stac_yymm),
+      revenueGrowth: toRatioNum(r.grs),
+      netIncomeGrowth: toRatioNum(r.ntin_inrt),
+      roe: toRatioNum(r.roe_val),
+      debtRatio: toRatioNum(r.lblt_rate),
+    }))
+    .sort((a, b) => (a.period < b.period ? 1 : -1));
+}
+
 type DailyChartResponse = {
   output2?: Array<{
     stck_bsop_date: string; // 영업일자 (YYYYMMDD)
