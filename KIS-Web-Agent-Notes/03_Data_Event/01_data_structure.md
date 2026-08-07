@@ -10,15 +10,19 @@
 
 | # | 테이블 | 역할 | 프로젝트 2 대비 |
 |---:|---|---|---|
-| 1 | `stocks` | 종목 마스터 | 동일 |
-| 2 | `orders` | 주문 | **단순화** (컬럼 4개 감소, `user_id` 추가) |
+| 1 | `stocks` | 종목 마스터 | **컬럼 1개 추가** (`dart_corp_code`, 8/7) |
+| 2 | `orders` | 주문 | ~~**단순화** (컬럼 4개 감소)~~ 🔄 **오히려 증가**했습니다 — 아래 참고 |
 | 3 | `rationales` | 판단 근거 | 동일 |
 | 4 | `kis_tokens` | KIS 토큰 캐시 | 🆕 **신규** |
 | 5 | `event_logs` | 이벤트 기록 | 동일 |
 | 6 | `user_wallets` | 사용자별 가상 예산 | 🆕 **신규** |
 | — | ~~`conversation_context`~~ | ~~대화 맥락~~ | 🗑️ **삭제** |
 
-**REQ-03은 최소 1개 테이블을 요구합니다.** 6개는 필요해서 6개이고, 더 늘리지 않습니다.
+**REQ-03은 최소 1개 테이블을 요구합니다.** 6개는 필요해서 6개이고, 끝까지 6개를 유지했습니다.
+
+> 🔄 **`orders` "단순화"는 결과적으로 틀린 예측이었습니다.** 계획 시점엔 시장가 전용이라 컬럼이 줄 것으로 봤지만, 8/7에 지정가 주문·체결 추적·취소가 들어오면서 `order_type`·`limit_price`·`filled_qty`·`filled_price`·`krx_fwdg_ord_orgno` 5개가 늘어 **최종 18컬럼**이 되었습니다. 2절에 실제 스키마를 반영했습니다.
+
+> ⚠️ **DB에는 테이블이 9개 보입니다.** Supabase 프로젝트를 프로젝트 2(n8n·텔레그램 봇, `kis-invest-bot`)와 **재사용**하고 있어서, 그쪽 테이블 3개(`alerts`·`trade_log`·`kis_token` 단수형)가 같은 `public` 스키마에 남아 있습니다. 이 프로젝트는 이 3개를 읽지도 쓰지도 않습니다 — `alerts`·`trade_log`는 텔레그램 식별자(`chat_id`)를 쓰고, `kis_token`(단수)은 프로젝트 2의 토큰 테이블로 이 프로젝트의 `kis_tokens`(복수)와 **별개**입니다. 이름이 한 글자 차이라 헷갈리기 쉬우니 주의합니다. 지우지 않은 이유는 프로젝트 2가 아직 동작하는 상태이기 때문입니다.
 
 > 🔴 **`user_wallets`가 신규로 늘어난 이유**: 계좌를 공개하되 소유자 패스코드로 막는 대신, **Google 로그인 + 사용자별 가상 예산으로 실제 주문을 허용**하기로 했습니다. 자세한 배경은 [[../02_Domain/02_user_roles|사용자 역할]] 1절을 참고합니다.
 
@@ -28,11 +32,12 @@
 
 ```sql
 create table stocks (
-  stock_code  varchar(6) primary key,
-  stock_name  text not null,
-  market      text not null,
-  is_active   boolean not null default true,
-  updated_at  timestamptz not null default now()
+  stock_code     varchar(6) primary key,
+  stock_name     text not null,
+  market         text not null,
+  is_active      boolean not null default true,
+  dart_corp_code varchar(8),              -- 🆕 8/7 추가
+  updated_at     timestamptz not null default now()
 );
 create index stocks_name_idx on stocks (stock_name);
 ```
@@ -41,14 +46,28 @@ create index stocks_name_idx on stocks (stock_name);
 |---|---|
 | `stock_code` | `005930` |
 | `stock_name` | `삼성전자` |
-| `market` | `KOSPI` / `KOSDAQ` |
+| `market` | `KOSPI` (실적재값은 전부 코스피입니다) |
 | `is_active` | 조회·주문 대상 여부 |
+| `dart_corp_code` | DART 고유번호(8자리). 공시 조회가 종목이 아니라 **회사** 단위 API라 별도 매핑이 필요합니다 — [[../05_Scope/01_mvp_scope\|MVP 범위]] 4.2f절 |
 
-### 🔴 범위 제한: 코스피 상위 100종목
+### ~~🔴 범위 제한: 코스피 상위 100종목~~ 🔄 코스피 전 종목 915개
 
-전체 상장 종목을 적재하면 준비 시간이 늘어납니다. 100종목이면 시연에 충분하고, 확대는 `Could`입니다.
+~~전체 상장 종목을 적재하면 준비 시간이 늘어납니다. 100종목이면 시연에 충분하고, 확대는 `Could`입니다.~~
 
-**적재 방법**: 종목 목록 CSV를 만들어 Supabase 대시보드에서 Import합니다. 코드로 적재 스크립트를 만들지 않습니다. **1회성 작업에 스크립트를 쓰면 시간이 배로 듭니다.**
+~~**적재 방법**: 종목 목록 CSV를 만들어 Supabase 대시보드에서 Import합니다. 코드로 적재 스크립트를 만들지 않습니다. **1회성 작업에 스크립트를 쓰면 시간이 배로 듭니다.**~~
+
+**실제로는 3단계로 늘었습니다.** 계획(100) → 초기 적재(357) → **최종 915**.
+
+| 시점 | 종목 수 | 적재 방법 |
+|---|---:|---|
+| 계획 | 100 | 수동 CSV Import |
+| Day 1~2 | 357 | 수동 CSV Import (계획대로) |
+| 8/7 | **915** | KIS 코스피 종목마스터(`kospi_code.mst.zip`, 인증 불필요) 파싱 — 그룹코드 `ST`(주권)만 추출해 ETF 1,160개·ETN 372개 제외 |
+| 8/7 | (동일) | DART 종목마스터로 `dart_corp_code` 매핑 — **915개 중 805개.** 누락 110개는 전부 우선주로, 공시가 회사 단위라 원래 개별 매핑이 없습니다 |
+
+> 🔄 **"스크립트를 쓰지 않는다"는 원칙은 뒤집혔습니다.** 100종목일 때는 맞는 판단이었지만, 915종목 + DART 매핑은 손으로 만들 수 있는 CSV가 아니었습니다. 확대 배경은 [[../05_Scope/01_mvp_scope\|MVP 범위]] 4.2e절에 있습니다.
+>
+> **검증 한계**: 915개 전부가 KIS 모의투자에서 시세·주문까지 되는지는 전수 검증하지 못했습니다. 화면에 실패 안내(`quoteError`)가 이미 있어 최악의 경우 조용히 안내만 뜹니다.
 
 ### 종목명 검색
 
@@ -64,19 +83,25 @@ create index stocks_name_idx on stocks (stock_name);
 
 ```sql
 create table orders (
-  id              bigserial primary key,
-  user_id         uuid not null references user_wallets(user_id),
-  stock_code      varchar(6) not null references stocks(stock_code),
-  stock_name      text not null,
-  side            text not null default 'buy',
-  qty             integer not null check (qty > 0),
-  expected_price  integer not null,
-  expected_amount bigint not null,
-  status          text not null default 'requested',
-  order_no        text,
-  reject_reason   text,
-  created_at      timestamptz not null default now(),
-  updated_at      timestamptz not null default now()
+  id                 bigserial primary key,
+  user_id            uuid not null references user_wallets(user_id),
+  stock_code         varchar(6) not null references stocks(stock_code),
+  stock_name         text not null,
+  side               text not null default 'buy',
+  qty                integer not null check (qty > 0),
+  expected_price     integer not null,
+  expected_amount    bigint not null,
+  status             text not null default 'requested',
+  order_no           text,
+  reject_reason      text,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+  -- 🆕 8/7 지정가 주문 도입으로 추가 (4.2c절)
+  order_type         text not null default 'market',  -- market | limit
+  limit_price        integer,                         -- 지정가일 때만
+  filled_qty         integer not null default 0,      -- 부분체결 추적
+  filled_price       integer,                         -- 실제 체결 단가
+  krx_fwdg_ord_orgno text                             -- 주문 취소에 필요한 KIS 원주문 조직번호
 );
 create index orders_created_idx on orders (created_at desc);
 create index orders_user_idx on orders (user_id);
@@ -89,19 +114,26 @@ create index orders_user_idx on orders (user_id);
 | 삭제 | 이유 |
 |---|---|
 | `chat_id` | 텔레그램 사용자 식별자. 웹에는 없습니다 |
-| `price` | 시장가 주문만 지원하므로 항상 `NULL`이었습니다. `expected_price`가 대신합니다 |
-| `expires_at` | 대기 상태가 없으므로 만료 대상이 없습니다 |
+| ~~`price`~~ 🔄 | ~~시장가 주문만 지원하므로 항상 `NULL`이었습니다~~ **8/7에 `limit_price`로 되살아났습니다.** 지정가를 넣으면서 "사용자가 지정한 가격"을 담을 자리가 다시 필요해졌습니다 |
+| `expires_at` | 대기 상태가 없으므로 만료 대상이 없습니다. 🔄 대기 상태(`submitted`)는 생겼지만 **만료는 여전히 안 씁니다** — KIS 모의투자가 당일 미체결분을 알아서 정리하고, 이쪽에서 만료를 관리하면 KIS 실제 상태와 어긋납니다 |
 
 > 🔴 **프로젝트 2의 `chat_id` 표현식 버그가 원천적으로 사라졌습니다.** 그 버그는 n8n 표현식이 평가되지 않아 생긴 것이었습니다. Next.js에서는 변수를 그대로 넘기므로 발생하지 않습니다.
 
-### `status` 값 — 2개
+### ~~`status` 값 — 2개~~ 🔄 5개
 
-| 값 | 의미 |
-|---|---|
-| `submitted` | KIS에 접수됨 |
-| `rejected` | 사전 검증 실패 또는 KIS 거부 |
+계획은 "주문 접수 = 끝"이라 2개면 충분했습니다. 지정가가 들어오면서 **접수와 체결이 갈라져** 5개가 되었습니다.
 
-`requested`는 KIS 호출 직전의 순간 상태입니다. 정상적으로는 화면에 보이지 않습니다. 남아 있다면 서버가 KIS 호출 중 죽은 것이므로 **디버깅 신호**로 씁니다.
+| 값 | 의미 | 언제 |
+|---|---|---|
+| `requested` | KIS 호출 직전의 순간 상태 | insert 직후 |
+| `filled` | 체결 완료 | 시장가는 접수 즉시, 지정가는 체결확인 후 |
+| `submitted` | **접수됐지만 아직 대기중** | 지정가 주문 접수 시 |
+| `cancelled` | 사용자가 취소함 | 대기중 주문 취소 시 |
+| `rejected` | 사전 검증 실패 또는 KIS 거부 | 검증 단계 또는 KIS 응답 |
+
+`requested`가 화면에 남아 있다면 서버가 KIS 호출 중 죽은 것이므로 **디버깅 신호**로 씁니다(계획 때와 동일).
+
+> 🔴 **`filled`과 `submitted`의 구분이 이 서비스의 전제를 바꿨습니다.** 원래 이 서비스는 "주문 접수 = 완료"를 전제로 만들어졌고, 그래서 예산 계산도 `expected_amount` 합계면 충분했습니다. 지정가는 접수해도 체결이 안 될 수 있어 **"쓴 돈"과 "묶인 돈"이 달라졌고**, 4절의 예산 계산이 통째로 다시 쓰였습니다.
 
 ### 🔴 `stock_name`을 중복 저장하는 이유
 
@@ -124,10 +156,12 @@ create index orders_user_idx on orders (user_id);
 ```sql
 -- 60초 내 동일 주문 조회로 처리 (인덱스 제약 대신 애플리케이션 검사)
 select id from orders
-where stock_code = $1 and qty = $2
+where user_id = $1 and stock_code = $2 and side = $3 and qty = $4
   and created_at > now() - interval '60 seconds'
 limit 1;
 ```
+
+> 🔴 **`side`는 나중에 추가한 조건이고, 없었으면 버그였습니다.** 매수만 있을 때는 문제가 없었지만, 8/7에 매도가 생기면서 **"5주 매수" 직후 "5주 매도"를 같은 주문의 중복으로 오인해 정상적인 매도를 막았을 것**입니다. 매도 기능을 만들다 발견해 같이 고쳤습니다([[../05_Scope/01_mvp_scope\|MVP 범위]] 4.2d절).
 
 프로젝트 2는 부분 유니크 인덱스를 썼습니다. 대기 상태가 있어 동시 실행이 실제로 발생했기 때문입니다. 웹에서는 **버튼 비활성화가 1차 방어**이므로 DB 제약까지 걸 필요가 없습니다. 걸면 오히려 정상적인 연속 주문이 막힙니다.
 
@@ -148,7 +182,11 @@ create table rationales (
 create index rationales_order_idx on rationales (order_id);
 ```
 
-### `reason_type` 선택지 6개
+### `reason_type` 선택지 — 매수 6개 + 🆕 매도 5개
+
+주문의 `side`에 따라 화면에 다른 목록을 보여줍니다(`lib/rationale.ts`).
+
+**매수 근거 6개** (계획대로)
 
 | 값 | 화면 표시 |
 |---|---|
@@ -158,6 +196,20 @@ create index rationales_order_idx on rationales (order_id);
 | `news` | 뉴스나 이슈를 봄 |
 | `dividend` | 배당을 기대 |
 | `gut` | 그냥 감 |
+
+**매도 근거 5개** 🆕 8/7 추가
+
+| 값 | 화면 표시 |
+|---|---|
+| `stop_loss` | 손절 |
+| `take_profit` | 익절 |
+| `target_reached` | 목표가 도달 |
+| `changed_mind` | 판단이 바뀜 |
+| `gut` | 그냥 감 |
+
+> 🔴 **매도 근거를 따로 만든 것이 매도 기능의 전제였습니다.** 매도를 원래 Won't Have로 뺀 이유가 바로 "근거 체계가 매수와 다르다"였습니다 — 손절·익절은 저평가·실적·업황과 대응되지 않습니다. 목록을 분리하니 그 문제가 없어져서 뒤집었습니다([[../05_Scope/01_mvp_scope\|MVP 범위]] 4.2d절).
+>
+> **`gut`은 양쪽에 공통으로 둡니다.** 아래 이유가 매도에도 그대로 적용되기 때문입니다.
 
 > **`그냥 감`을 넣은 이유**: 없으면 사용자가 아무거나 고릅니다. 그러면 데이터가 오염되고 측정값을 믿을 수 없게 됩니다. 정직한 선택지를 주면 `gut` 비율 자체가 지표가 됩니다. **이 프로젝트의 목적은 `gut` 비율을 줄이는 것입니다.**
 
@@ -194,15 +246,39 @@ create table user_wallets (
 
 ### 예산 소진 계산
 
-저장된 잔여 예산 컬럼을 따로 두지 않습니다. 대신 매 주문마다 다시 계산합니다.
+저장된 잔여 예산 컬럼을 따로 두지 않습니다. 대신 매번 다시 계산합니다.
 
-```sql
+**컬럼으로 캐시하지 않는 이유**: 캐시된 값과 실제 주문 합계가 어긋나는 사고를 원천 차단합니다. 사용자 수가 적은 4일 프로젝트에서는 매번 계산해도 성능 문제가 없습니다. **이 원칙은 끝까지 유지했습니다.**
+
+~~```sql
 select coalesce(sum(expected_amount), 0) as spent
-from orders
-where user_id = $1 and status = 'submitted';
-```
+from orders where user_id = $1 and status = 'submitted';
+```~~
 
-`allocated_amount - spent`가 남은 예산입니다. **컬럼으로 캐시하지 않는 이유**: 캐시된 값과 실제 주문 합계가 어긋나는 사고를 원천 차단합니다. 사용자 수가 적은 4일 프로젝트에서는 매번 계산해도 성능 문제가 없습니다.
+> 🔴 **위 SQL은 지정가·매도 도입으로 완전히 무효가 됐습니다.** 그대로 돌리면 지금 DB에서 **0원**이 나옵니다 — 체결된 주문은 `filled`이라 `status = 'submitted'` 조건에 안 걸리기 때문입니다.
+
+계산은 SQL 한 줄이 아니라 `lib/portfolio.ts`의 `lockedAmount()`가 주문 한 건씩 처리합니다. 규칙이 세 갈래로 갈립니다.
+
+| 주문 | 예산에서 묶는 금액 | 왜 |
+|---|---|---|
+| **매수 · 체결분** | `filled_qty × filled_price` | 실제로 나간 돈. 주문 시점 예상가가 아니라 **체결가** 기준 |
+| **매수 · 대기중 잔량** (`submitted`) | `(qty - filled_qty) × limit_price` | 실제 증권사처럼 **매수 여력을 미리 묶습니다.** 안 묶으면 취소하지 않은 채 다른 종목을 또 살 수 있습니다 |
+| **매도 · 체결분** | `- (filled_qty × filled_price)` (**음수**) | 판 만큼 예산으로 돌려줍니다 |
+| **매도 · 대기중 잔량** | 0 | 아직 현금이 안 들어왔습니다. 대신 그 수량을 `availableToSell`에서 빼 **중복 매도**를 막습니다 |
+
+`allocated_amount - Σ lockedAmount`가 남은 예산입니다.
+
+> 🔴 **"쓴 돈"과 "묶인 돈"이 갈라진 것이 이 변경의 본질입니다.** 시장가만 있을 때는 접수 = 체결이라 둘이 같았습니다. 지정가는 접수해도 체결이 안 될 수 있어서, **아직 안 쓴 돈인데 묶어둬야 하는** 상태가 처음 생겼습니다.
+
+### 보유 수량과 평단가
+
+| 값 | 규칙 | 왜 |
+|---|---|---|
+| 보유 수량 | `Σ 매수 체결 - Σ 매도 체결` | **접수가 아니라 체결(`filled_qty`) 기준.** 부분체결도 그만큼은 이미 내 것입니다 |
+| 평단가 | 매수 체결분의 가중평균. **매도해도 안 바뀜** | 평균 매입단가 방식. 일부를 팔았다고 남은 주식의 원가가 바뀌지는 않습니다 |
+| 매도 가능 수량 | `보유 수량 - 대기중인 매도 잔량` | 같은 주식을 두 번 팔려고 내놓는 것을 막습니다 |
+
+> 🔴 **KIS 계좌 잔고를 쓰지 않습니다.** 모의계좌 1개를 여러 방문자가 나눠 쓰므로 계좌 잔고에는 남의 주문과 서비스 이전부터 있던 종목이 섞여 있습니다. 그걸 "내 계좌"로 보여주면 **사용자가 사지도 않은 종목을 자기 것으로 읽습니다.** 그래서 보유 종목은 전적으로 `orders` 집계로만 만듭니다.
 
 ### 이 테이블과 실제 계좌 예수금의 관계
 
@@ -292,11 +368,13 @@ Supabase Auth를 쓰므로 **`auth.uid()`로 실제 신원을 확인할 수 있�
 | 테이블 | RLS | 정책 |
 |---|---|---|
 | `stocks` | on | `select` 전체 허용 (공개 데이터) |
-| `orders` | on | `select`·`insert` — `auth.uid() = user_id`인 행만 |
+| `orders` | on | `select`·`insert`·**`update`** — `auth.uid() = user_id`인 행만 |
 | `rationales` | on | `select`·`insert` — 연결된 `orders.user_id = auth.uid()`인 행만 (서브쿼리) |
 | `user_wallets` | on | `select` — `auth.uid() = user_id`인 행만. **`insert`·`update`는 정책 없음(서버 전용)** |
-| `kis_tokens` | on | 🔴 **정책 없음 (전면 차단)** |
-| `event_logs` | on | 🔴 **정책 없음 (전면 차단)** |
+| `kis_tokens` | on | 🔴 **정책 없음** (anon key로 차단, service role은 우회) |
+| `event_logs` | on | 🔴 **정책 없음** (동일) |
+
+> 🆕 **`orders`의 `update` 정책은 계획에 없었습니다.** 지정가 주문의 체결확인·취소가 기존 행의 `status`·`filled_qty`를 고쳐야 해서 추가했습니다. 이 정책이 없으면 두 기능이 조용히 실패합니다.
 
 ```sql
 create policy "select own orders" on orders
@@ -317,7 +395,22 @@ create policy "select own wallet" on user_wallets
   for select using (auth.uid() = user_id);
 ```
 
-**모든 쓰기는 여전히 Route Handler를 통합니다.** 다만 이제 Route Handler가 요청자의 로그인 세션(쿠키의 Supabase Auth 토큰)을 그대로 사용해 Supabase를 호출하므로, DB가 `auth.uid()`로 신원을 한 번 더 검증합니다. **사전 검증(장 시간·예수금·가상 예산)은 여전히 서버 로직이 담당**하고, RLS는 그 결과가 "본인 이름으로만" 기록되도록 하는 마지막 방어선입니다.
+**모든 쓰기는 여전히 Route Handler를 통합니다.** 사용자 데이터(`orders`·`rationales`)를 쓸 때는 Route Handler가 요청자의 로그인 세션(쿠키의 Supabase Auth 토큰)을 그대로 사용해 Supabase를 호출하므로, DB가 `auth.uid()`로 신원을 한 번 더 검증합니다. **사전 검증(장 시간·예수금·가상 예산)은 여전히 서버 로직이 담당**하고, RLS는 그 결과가 "본인 이름으로만" 기록되도록 하는 마지막 방어선입니다.
+
+### ⚠️ service role key를 실제로 씁니다 (계획과 다름)
+
+[[02_data_sources|데이터 소스]] 문서는 원래 "service role key를 사용하지 않습니다"라고 단정했고, 대안으로 `security definer` 함수(`get_kis_token()`)를 Should 항목에 뒀습니다. **그 함수는 만들지 않았고, service role key를 쓰고 있습니다.**
+
+| 무엇을 | 왜 세션 키로는 안 되는가 |
+|---|---|
+| `kis_tokens` 읽기·쓰기 (`lib/kis.ts`) | 정책이 없어 세션 키로는 접근 자체가 막힙니다. **로그인하지 않은 방문자도 시세를 봐야 하므로** 세션이 없을 수도 있습니다 |
+| `event_logs` 쓰기 (`lib/events.ts`) | 동일. 토큰 갱신 실패 같은 **로그인 이전 단계의 이벤트**도 기록해야 합니다 |
+| `user_wallets` upsert (`/api/order`) | 예산 지급은 서버만 해야 하므로 `insert`·`update` 정책을 일부러 두지 않았습니다 |
+| `stocks` 조회 일부 (`/api/disclosures`, `/api/ai/explain`) | 공개 데이터라 세션 키로도 되지만 admin 클라이언트를 재사용했습니다 — **줄일 수 있는 부분** |
+
+> 🔴 **이것은 알려진 한계이고 발표에서 그대로 말합니다.** 원래 계획(`02_data_sources` 6절)이 "시간이 부족하면 service role key를 쓰고 Day 4에 함수로 교체하되, **그 경우 발표에서 한계로 명시한다**"였습니다. 교체를 못 했으므로 명시 쪽 약속을 지킵니다.
+>
+> **실제 위험 크기**: 이 키는 서버 환경변수에만 있고 `NEXT_PUBLIC_` 접두사가 없어 브라우저 번들에 들어가지 않습니다. 즉 **키 자체가 새는 경로는 없습니다.** 문제는 서버 코드에 버그가 생겼을 때 RLS가 막아주지 못한다는 것 — 방어선이 2겹에서 1겹이 됩니다.
 
 > ⚠️ `orders`·`rationales`를 본인 것만 보이게 좁힌 이유: 익명 쿠키 시절에는 개인정보가 없다는 이유로 전체 공개를 검토했지만, 이제는 실제 계정과 묶이므로 **다른 사용자의 매매 내역이 노출되면 안 됩니다.**
 

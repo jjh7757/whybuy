@@ -1,36 +1,109 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 왜샀어 (WhyBuy)
 
-## Getting Started
+> 주문 직전에 "왜 사는지"를 반드시 적게 하고, 그 근거들을 한 화면에서 되돌아보게 만드는 모의투자 웹 서비스입니다.
 
-First, run the development server:
+**배포 주소** — https://whybuy-gray.vercel.app
+
+투자를 막 시작한 사람은 뉴스·소문·감으로 일단 사고, 나중엔 왜 샀는지 기억하지 못해 같은 실수를 반복합니다. 이 서비스는 근거를 고르지 않으면 주문 버튼이 잠기고, 나중에 "그때 얼마였고 왜 샀는지 → 지금 어떻게 됐는지"를 한 줄로 대조해 보여줍니다.
+
+주문은 흉내가 아닙니다. 한국투자증권(KIS) 모의투자 Open API로 **실제 주문번호가 발급**됩니다.
+
+---
+
+## 화면 3개
+
+| 경로 | 화면 | 내용 |
+|---|---|---|
+| `/` | 내 계좌 | 가상 투자금·주문에 쓴 금액·남은 예산, 보유 종목과 평가손익, 대기중인 지정가 주문(체결 확인·취소) |
+| `/trade` | 종목 찾아보기 | 검색·인기 종목 → 탭 3개(차트·호가 / 종목정보 / 공시뉴스) → 근거를 고르고 매수·매도 주문 |
+| `/journal` | 지난 근거 | 과거 주문의 근거와 당시 가격 vs 현재 가격, AI의 근거 편중 지적 |
+
+첫 방문자에게는 실제 화면 요소를 짚어주는 6단계 스포트라이트 튜토리얼이 자동 실행됩니다.
+
+## 주요 기능
+
+- **근거를 남겨야 완료되는 주문** — 매수 6종(저평가/실적/업황/뉴스/배당/감)·매도 5종(손절/익절/목표가 도달/판단 변경/감) 중 하나를 반드시 선택. 시장가·지정가 모두 지원하고, 지정가는 체결 확인·부분 체결·취소까지 처리합니다.
+- **AI 해석 2종** — ① 시세·계좌 화면의 숫자가 무엇을 뜻하는지 설명(최근 공시·뉴스를 "있었던 일"로만 함께 언급) ② 최근 근거 20건을 보고 편중을 지적하고 다음에 스스로 물어볼 질문 1개를 제안. **매수·매도는 절대 권유하지 않습니다.**
+- **판단 재료** — 종가 그래프(일/주/월/년 + 분봉, 호버 툴팁), 오늘·52주 범위, PER·PBR·EPS·BPS, 재무비율, 배당 이력, DART 공시·뉴스. 캔들·이동평균선은 의도적으로 넣지 않았습니다.
+- **공시뉴스 탭** — AI가 해석에 쓰는 공시·뉴스를 사용자도 원문 그대로 볼 수 있습니다. AI만 원본을 보면 사용자가 AI 말을 검증할 수 없기 때문입니다.
+
+---
+
+## 기술 스택
+
+| 영역 | 사용 |
+|---|---|
+| 프레임워크 | Next.js 16.3.0 (App Router), React 19.2.8, TypeScript 5 |
+| 스타일 | Tailwind CSS v4 (`@tailwindcss/postcss`) |
+| 배포 | Vercel (`vercel.json`으로 리전을 한국 `icn1`에 고정 — KIS 왕복 지연 단축) |
+| DB·인증 | Supabase (PostgreSQL + RLS, Google OAuth) — `@supabase/ssr` 0.12.4 |
+| AI | Google Gemini `gemini-3.5-flash` — SDK 없이 `generateContent` REST 직접 호출 |
+| 외부 데이터 | KIS Open API(모의투자), DART 공시 API, Google 뉴스 RSS |
+
+### Supabase 테이블 6개
+
+`stocks`(종목 마스터, 코스피 전 종목 915개) · `orders`(주문) · `rationales`(판단 근거) · `user_wallets`(사용자별 가상 예산) · `kis_tokens`(KIS 토큰 캐시) · `event_logs`(이벤트 기록)
+
+---
+
+## 로컬 실행
+
+```bash
+npm install
+```
+
+`.env.local`에 아래 10개를 채웁니다. **`NEXT_PUBLIC_` 접두사가 붙은 2개만 브라우저에 노출되고, 나머지 8개는 서버 전용입니다.**
+
+| 변수 | 용도 |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase 프로젝트 URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
+| `SUPABASE_SERVICE_ROLE_KEY` | 서버 전용. `kis_tokens`·`event_logs`처럼 로그인 여부와 무관하게 서버만 접근해야 하는 테이블에 사용 |
+| `GEMINI_API_KEY` | Gemini API 키 |
+| `KIS_APP_KEY` | KIS 앱키 |
+| `KIS_APP_SECRET` | KIS 앱시크릿 |
+| `KIS_BASE_URL` | KIS 모의투자 베이스 URL |
+| `KIS_ACCOUNT_NO` | KIS 모의계좌 번호 |
+| `KIS_ACCOUNT_PRODUCT_CODE` | KIS 계좌 상품코드 |
+| `DART_API_KEY` | DART OpenAPI 인증키 |
+
+> ⚠️ `SUPABASE_SERVICE_ROLE_KEY`와 `DART_API_KEY`가 없으면 주문·공시 기능이 동작하지 않습니다.
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 설계에서 신경 쓴 것
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+**AI가 판단을 대신하지 않습니다.** 모든 프롬프트 앞에 공통 금지 규칙을 붙여 종목 매수·매도 권유, 목표가·수익률 예측, 사용자 판단에 대한 옳고 그름 평가를 막았습니다. PER·PBR은 "높다/낮다"까지만 말하고 "싸다/비싸다·고평가/저평가"로 단정하지 못하게 한 번 더 못박았습니다.
 
-## Learn More
+**AI가 실패해도 화면이 깨지지 않습니다.** Gemini 호출 함수는 절대 throw하지 않고 `{ok:false}`만 반환합니다. 화면은 숫자를 그대로 둔 채 AI 영역만 "해석을 준비하지 못했습니다 + 다시 시도"로 바뀝니다. 모델이 출력 형식(`제목|내용`)을 안 지켜도 글이 사라지지 않도록 형식 파싱 실패 → 빈 줄 문단 분리 → 통짜 한 덩어리 순의 폴백 체인을 뒀습니다.
 
-To learn more about Next.js, take a look at the following resources:
+**KIS 레이트리밋을 한 곳에서 막습니다.** KIS는 앱키당 초당 1건만 허용합니다(`EGW00201`). 기능마다 따로 재시도·캐시를 넣는 대신, 모든 KIS 호출이 거치는 `callKis`에 "마지막 호출로부터 최소 1.1초 대기"하는 전역 큐를 하나 뒀습니다. 라우트별 TTL 캐시(인기 종목 15초, 차트 60·180초, 배당·재무 60분)로 호출 자체를 줄입니다.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**계좌 잔고 대신 내 주문 기록을 씁니다.** 모의계좌 1개를 여러 방문자가 나눠 쓰므로 계좌 잔고에는 남의 주문이 섞여 있습니다. 그걸 "내 계좌"로 보여주면 사용자가 사지도 않은 종목을 자기 것으로 읽게 됩니다. 보유 종목·예산은 전적으로 `orders` 집계로만 만듭니다.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+**기록의 불변성을 정규화보다 우선합니다.** `orders`에 종목명을 중복 저장합니다. 종목명이 바뀌거나 상장폐지되어 `stocks`에서 사라져도 "그때 무엇을 샀는지"는 남아야 하기 때문입니다.
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## 알려진 한계
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **모의계좌 1개를 가상 예산으로 나눠 쓰는 구조**입니다. 실서비스로 확장하려면 사용자별 실계좌 연동이 필요하며, 현재 구조는 자본시장법상 검토가 필요합니다. 자세한 분석은 [미니프로젝트3_진준형.md](미니프로젝트3_진준형.md) 9절에 있습니다.
+- **service role key를 사용합니다.** 원래는 `security definer` 함수로 대체할 계획이었으나 4일 안에 못 했습니다. 키 자체는 서버 환경변수에만 있어 브라우저 번들에 들어가지 않지만, 서버 코드에 버그가 생겼을 때 RLS가 막아주지 못합니다.
+- **지정가 주문의 가격을 서버가 시세와 대조하지 않습니다.** 호가단위 배수인지만 검증합니다.
+- **코스피 915종목 전부가 KIS 모의투자에서 시세·주문까지 되는지 전수 검증하지 못했습니다.** 실패 시 화면에 안내가 뜹니다.
+- **매도 주문을 실제 로그인 상태로 끝까지 눌러보지 못했습니다.** 공유 모의계좌라 대신 눌러볼 계정이 없어, 기존 실주문 데이터로 집계 로직만 손으로 대조했습니다.
+- **표본이 작습니다.** 본인과 테스트 사용자 2명이 4일간 만든 데이터는 통계가 아닙니다. 측정값은 비율이 아니라 실수(`6건 중 4건`)로 표시합니다.
+
+---
+
+## 기획 문서
+
+설계 과정과 판단 근거는 [`KIS-Web-Agent-Notes/`](KIS-Web-Agent-Notes/)에 있습니다. 계획이 뒤집힌 곳은 지우지 않고 **원래 계획 + 왜 뒤집었는지**를 함께 남겼습니다.
+
+- [MVP 범위와 우선순위](KIS-Web-Agent-Notes/05_Scope/01_mvp_scope.md) — 4.2b~4.2g절에 "계획에 없던 것을 왜 넣었는지"가 시간순으로 정리돼 있습니다
+- [범위 축소 설명서](KIS-Web-Agent-Notes/07_Submit/02_scope_reduction.md) — 무엇을 뺐고 무엇을 다시 넣었는지
+- [데이터 구조](KIS-Web-Agent-Notes/03_Data_Event/01_data_structure.md) · [업무 흐름과 예외](KIS-Web-Agent-Notes/02_Domain/03_workflow.md) · [아키텍처](KIS-Web-Agent-Notes/04_Architecture/02_architecture.md)

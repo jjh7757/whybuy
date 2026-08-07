@@ -436,7 +436,7 @@ export function TradeFlow() {
 
       {notFound && (
         <div className="rounded-xl border border-neutral-200 bg-white p-4 text-sm">
-          <p>코스피 상위 종목만 지원합니다. 다른 종목명으로 검색해보세요.</p>
+          <p>코스피 상장 종목만 지원합니다. 다른 종목명으로 검색해보세요.</p>
           <p className="mt-2 text-neutral-500">예시:</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {EXAMPLES.map((s) => (
