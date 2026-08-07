@@ -64,21 +64,32 @@ async function writeToken(accessToken: string, expiresAt: Date) {
   });
 }
 
+// 🔴 분봉 조회(getIntradayCloses)는 한 요청 안에서 callKis를 최대 14번 부릅니다.
+// 매번 Supabase에서 토큰을 다시 읽으면 페이지당 왕복 하나가 그냥 낭비되므로,
+// 같은 서버리스 인스턴스가 살아있는 동안은 메모리에 들고 있다가 그것만 봅니다.
+let memoryToken: { accessToken: string; expiresAt: Date } | null = null;
+
 /** kis_tokens 캐시를 확인하고, 만료됐으면 재발급합니다. */
 export async function getAccessToken(): Promise<string> {
-  const cached = await readCachedToken();
+  if (memoryToken && memoryToken.expiresAt.getTime() > Date.now()) {
+    return memoryToken.accessToken;
+  }
 
+  const cached = await readCachedToken();
   if (cached && new Date(cached.expires_at).getTime() > Date.now()) {
-    return cached.access_token;
+    memoryToken = { accessToken: cached.access_token, expiresAt: new Date(cached.expires_at) };
+    return memoryToken.accessToken;
   }
 
   const { accessToken, expiresAt } = await fetchNewToken();
   await writeToken(accessToken, expiresAt);
+  memoryToken = { accessToken, expiresAt };
   return accessToken;
 }
 
 /** 캐시된 토큰을 강제로 만료시킵니다. 401 응답을 받았을 때 씁니다. */
 async function invalidateToken() {
+  memoryToken = null;
   const supabase = createAdminClient();
   await supabase
     .from("kis_tokens")
