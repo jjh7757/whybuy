@@ -10,6 +10,7 @@ type OrderRecord = {
   id: number;
   stock_code: string;
   stock_name: string;
+  side: string;
   qty: number;
   expected_price: number;
   status: string;
@@ -62,7 +63,7 @@ async function JournalBody() {
   const { data, error } = await supabase
     .from("orders")
     .select(
-      "id, stock_code, stock_name, qty, expected_price, status, created_at, rationales(reason_type, reason_memo)",
+      "id, stock_code, stock_name, side, qty, expected_price, status, created_at, rationales(reason_type, reason_memo)",
     )
     .order("created_at", { ascending: false });
 
@@ -84,6 +85,7 @@ async function JournalBody() {
     id: o.id,
     stockCode: o.stock_code,
     stockName: o.stock_name,
+    side: o.side === "sell" ? "sell" : "buy",
     qty: o.qty,
     expectedPrice: o.expected_price,
     status: o.status,

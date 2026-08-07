@@ -7,6 +7,7 @@ export type JournalRow = {
   id: number;
   stockCode: string;
   stockName: string;
+  side: "buy" | "sell";
   qty: number;
   expectedPrice: number;
   status: string;
@@ -59,6 +60,15 @@ export function JournalList({ rows }: { rows: JournalRow[] }) {
           >
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <span className="font-medium">
+                <span
+                  className={`mr-1.5 rounded px-1.5 py-0.5 text-xs font-medium ${
+                    row.side === "sell"
+                      ? "bg-blue-50 text-blue-600"
+                      : "bg-red-50 text-red-600"
+                  }`}
+                >
+                  {row.side === "sell" ? "매도" : "매수"}
+                </span>
                 {row.stockName} · {row.qty}주
               </span>
               <span className="text-xs text-neutral-500">
