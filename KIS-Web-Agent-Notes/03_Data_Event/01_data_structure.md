@@ -447,12 +447,14 @@ kis_tokens  (독립. 어디와도 연결되지 않음)
 
 발표에서 쓸 숫자를 미리 정의합니다.
 
+> 🔴 **1번 SQL의 상태 필터를 고쳤습니다.** 원래 `where o.status in ('submitted', 'rejected')`였는데, 상태가 5종으로 늘면서 **체결된 주문(`filled`)과 취소한 주문(`cancelled`)을 통째로 빼먹고 있었습니다.** 지금 DB에 그대로 돌리면 8건 중 1건만 잡힙니다. 근거는 상태와 무관하게 **모든 주문에** 붙으므로 필터 자체가 필요 없습니다.
+
 ```sql
 -- 1. 근거 기록률 (목표 100%)
+-- 🔄 상태 필터 제거: 근거는 KIS 호출 전에 저장되므로 어떤 상태로 끝나든 붙어 있습니다.
 select
   count(*) filter (where r.id is not null)::float / nullif(count(*), 0) as rate
-from orders o left join rationales r on r.order_id = o.id
-where o.status in ('submitted', 'rejected');
+from orders o left join rationales r on r.order_id = o.id;
 
 -- 2. "그냥 감" 비율
 select
