@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { REASON_TYPES } from "@/lib/rationale";
+import { isValidTickPrice, priceTickSize } from "@/lib/market";
 import { AiExplain } from "@/components/AiExplain";
 import { DividendInfo } from "@/components/DividendInfo";
 import { FinancialRatios } from "@/components/FinancialRatios";
@@ -224,7 +225,9 @@ export function TradeFlow() {
   const limitPriceNum = Number(limitPrice);
   const validLimitPrice =
     orderType === "market" ||
-    (limitPrice.trim() !== "" && Number.isInteger(limitPriceNum) && limitPriceNum > 0);
+    (limitPrice.trim() !== "" &&
+      Number.isInteger(limitPriceNum) &&
+      isValidTickPrice(limitPriceNum));
   // 지정가는 사용자가 지정한 가격, 시장가는 현재가로 예상 금액을 계산합니다.
   const effectivePrice = orderType === "limit" ? limitPriceNum : (quote?.price ?? 0);
   const expectedAmount = validQty && validLimitPrice && quote ? qtyNum * effectivePrice : 0;
@@ -559,13 +562,20 @@ export function TradeFlow() {
                   <input
                     type="number"
                     min={1}
+                    step={priceTickSize(limitPriceNum > 0 ? limitPriceNum : quote.price)}
                     value={limitPrice}
                     onChange={(e) => setLimitPrice(e.target.value)}
                     placeholder={String(quote.price)}
                     className="tnum w-full rounded-xl border border-neutral-200 px-3 py-2 text-right text-lg font-medium outline-none transition focus:border-neutral-900"
                   />
                   {limitPrice.trim() !== "" && !validLimitPrice && (
-                    <span className="text-xs text-red-600">1원 이상의 정수로 입력해주세요.</span>
+                    <span className="text-xs text-red-600">
+                      이 가격대는{" "}
+                      {priceTickSize(limitPriceNum > 0 ? limitPriceNum : quote.price).toLocaleString(
+                        "ko-KR",
+                      )}
+                      원 단위로만 지정할 수 있습니다.
+                    </span>
                   )}
                   <span className="text-xs text-neutral-400">
                     이 가격이 될 때까지 체결되지 않을 수 있습니다. 대기중인 주문은 내 계좌에서

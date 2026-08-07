@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getQuote, getBuyableCash, placeBuyOrder } from "@/lib/kis";
-import { isMarketOpen } from "@/lib/market";
+import { isMarketOpen, isValidTickPrice } from "@/lib/market";
 import { REASON_TYPES } from "@/lib/rationale";
 import { logEvent } from "@/lib/events";
 import { DEFAULT_ALLOCATED_AMOUNT, getMyPortfolio } from "@/lib/portfolio";
@@ -54,7 +54,8 @@ export async function POST(request: Request) {
     qty <= 0 ||
     !reasonType ||
     !REASON_VALUES.has(reasonType) ||
-    (orderType === "limit" && (!Number.isInteger(limitPrice) || (limitPrice as number) <= 0))
+    (orderType === "limit" &&
+      (!Number.isInteger(limitPrice) || !isValidTickPrice(limitPrice as number)))
   ) {
     return NextResponse.json(
       { ok: false, code: "invalid_input", message: "입력값이 올바르지 않습니다." },
