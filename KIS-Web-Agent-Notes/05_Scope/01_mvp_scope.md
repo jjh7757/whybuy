@@ -113,7 +113,7 @@ Day 1 밤에 Day 2 본체(주문 흐름)까지 예상보다 빨리 끝나면서,
 
 > 🔴 **"체결 조회"를 완전히 되돌린 것은 아닙니다.** 4.4절이 배제한 것은 "실시간 알림·스케줄러로 자동 체결을 감시하는 것"이었고, 그 이유(Vercel에 상주 프로세스가 없음)는 여전히 유효합니다. 지금 들어간 체결확인은 **사용자가 "내 계좌"에서 버튼을 눌렀을 때만** KIS에 한 번 물어보는 방식이라 스케줄러가 아닙니다. 시장가 주문(기존 방식)은 여전히 접수 즉시 완료로 취급합니다 — 지정가를 골랐을 때만 이 경로를 탑니다.
 >
-> **부작용**: `orders.status`가 `requested/submitted/rejected` 3가지에서 `requested/filled/submitted(대기중)/cancelled/rejected` 5가지로 늘었고, `filled_qty`·`filled_price`·`limit_price`·`order_type`·`krx_fwdg_ord_orgno` 컬럼이 추가됐습니다. 가상 예산 계산도 "체결분 + 대기중 잔량 예약"으로 바뀌었습니다(`lib/portfolio.ts`). **`02_Domain/03_workflow.md`의 흐름 D 17단계 서술은 시장가 기준 옛 버전 그대로라 이 변경을 반영하지 못했습니다** — 다음에 그 문서를 손댈 일이 있으면 같이 고칠 것.
+> **부작용**: `orders.status`가 `requested/submitted/rejected` 3가지에서 `requested/filled/submitted(대기중)/cancelled/rejected` 5가지로 늘었고, `filled_qty`·`filled_price`·`limit_price`·`order_type`·`krx_fwdg_ord_orgno` 컬럼이 추가됐습니다. 가상 예산 계산도 "체결분 + 대기중 잔량 예약"으로 바뀌었습니다(`lib/portfolio.ts`). ~~**`02_Domain/03_workflow.md`의 흐름 D 17단계 서술은 시장가 기준 옛 버전 그대로라 이 변경을 반영하지 못했습니다** — 다음에 그 문서를 손댈 일이 있으면 같이 고칠 것.~~ ✅ **8/7 저녁에 처리했습니다.** 흐름 D를 코드 순서대로 재작성했고, 그 과정에서 예외 2.11의 예수금↔가상예산 순서가 이 문서(4.2c절 대신 다른 문서)와도 어긋나 있던 것을 함께 정정했습니다.
 
 ### 4.2d 8/7 — 매도 주문 추가 (Won't Have 항목을 뒤집음)
 
