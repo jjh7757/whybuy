@@ -94,6 +94,23 @@ type KisCallOptions = {
   hashkey?: string;
 };
 
+// 모의투자 도메인은 앱키당 초당 1건으로 막습니다(EGW00201). 시세 조회 바로 뒤에
+// 매수가능조회가 이어지는 것처럼 같은 요청 안에서도 KIS를 두 번 부르는 경로가 있어,
+// 호출 사이를 실제로 띄워주는 큐가 없으면 거의 매번 걸립니다.
+const KIS_MIN_INTERVAL_MS = 1100;
+let kisQueue: Promise<void> = Promise.resolve();
+let kisLastCallAt = 0;
+
+function reserveKisSlot(): Promise<void> {
+  const slot = kisQueue.then(async () => {
+    const wait = kisLastCallAt + KIS_MIN_INTERVAL_MS - Date.now();
+    if (wait > 0) await sleep(wait);
+    kisLastCallAt = Date.now();
+  });
+  kisQueue = slot.catch(() => {});
+  return slot;
+}
+
 /**
  * KIS API를 호출합니다. 401(인증 만료)이면 토큰을 무효화하고 딱 1회만 재시도합니다.
  * 서버리스에서 재시도 루프는 요청 폭주가 되므로 2회 이상 시도하지 않습니다.
@@ -109,6 +126,7 @@ export async function callKis(
     Object.entries(options.query).forEach(([k, v]) => url.searchParams.set(k, v));
   }
 
+  await reserveKisSlot();
   const res = await fetch(url, {
     method: options.method ?? "GET",
     headers: {
@@ -202,6 +220,7 @@ export async function placeBuyOrder(
     ORD_UNPR: "0",
   };
 
+  await reserveKisSlot();
   const hashRes = await fetch(`${BASE_URL}/uapi/hashkey`, {
     method: "POST",
     headers: {
@@ -377,6 +396,20 @@ type MinuteChartResponse = {
 const MARKET_OPEN = "090000";
 const MARKET_CLOSE = "153000";
 
+// 서버가 어느 시간대에서 돌든 KST 기준 HHMMSS로 맞추기 위함입니다.
+function nowKstHms(): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (type: string) => (parts.find((p) => p.type === type)?.value ?? "00").padStart(2, "0");
+  const hour = get("hour") === "24" ? "00" : get("hour");
+  return `${hour}${get("minute")}${get("second")}`;
+}
+
 // 30분 페이지를 몇 번 이어붙여야 하루(09:00~15:30, 390분)를 채우는지의 상한입니다.
 // 390 ÷ 30 = 13, 여유를 하나 둡니다.
 const INTRADAY_MAX_PAGES = 14;
@@ -424,7 +457,13 @@ async function fetchMinutePage(stockCode: string, hour: string) {
  * 7초에서 남은 페이지를 포기하고 그때까지 모은 것만 보여줍니다.
  */
 export async function getIntradayCloses(stockCode: string): Promise<ChartPoint[]> {
-  let anchor = MARKET_CLOSE;
+  // 장중에는 "지금"을 기준점으로 삼아야 뒤로 페이지네이션한 결과가 실제 현재
+  // 시각까지 닿습니다. 항상 장 마감(15:30)에서 시작하면, 예산(7초) 안에 모을 수
+  // 있는 건 장 마감 직전 몇 시간뿐이라 개장 직후(예: 09:20)엔 데이터가 전부
+  // "아직 오지 않은 시각"이 되어버립니다(프런트가 지금 시각 이후를 잘라내므로).
+  // 장 시작 전·마감 후에는 어차피 프런트가 화면을 비우므로 장 마감을 그대로 씁니다.
+  const nowHms = nowKstHms();
+  let anchor = nowHms > MARKET_OPEN && nowHms < MARKET_CLOSE ? nowHms : MARKET_CLOSE;
   const collected: { time: string; close: number }[] = [];
   const seen = new Set<string>();
   const startedAt = Date.now();

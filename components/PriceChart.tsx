@@ -27,6 +27,29 @@ const W = 600;
 const H = 140;
 const PAD_Y = 8;
 
+const MARKET_OPEN_MIN = 9 * 60;
+const MARKET_CLOSE_MIN = 15 * 60 + 30;
+const MARKET_MINUTES = MARKET_CLOSE_MIN - MARKET_OPEN_MIN;
+
+function labelToMinutes(label: string): number {
+  const [h, m] = label.split(":").map(Number);
+  return h * 60 + m;
+}
+
+// 모의투자 도메인은 실제 시각과 무관하게 하루치(09:00~15:30) 분봉을 통째로 내려줍니다.
+// 지금 몇 분이 지났는지는 서버가 아니라 브라우저 시계로 판단해야 "지금까지"만 그려집니다.
+function nowKstMinutes(): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0") % 24;
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  return hour * 60 + minute;
+}
+
 /**
  * 종가를 선 하나로 보여줍니다. 일·주·월·년 구간을 토글합니다.
  *
@@ -57,13 +80,33 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
   // 포인터 x좌표를 그 위치에 가장 가까운 데이터 인덱스로 바꿉니다.
   // 뷰박스(600) 기준이 아니라 SVG가 실제로 그려진 화면 폭을 기준으로 계산해야
   // 화면 크기·레이아웃이 달라져도 짚은 위치와 표시되는 값이 어긋나지 않습니다.
-  function updateHoverFromClientX(clientX: number, pointCount: number) {
+  //
+  // "일" 구간은 지금까지 흐른 시간만큼만 폭을 채우고 나머지는 비워두므로
+  // (등분이 아니라 시간 비례 배치), 화면 폭 비율을 봉 개수가 아니라 실제
+  // 하루 시간으로 환산해 가장 가까운 봉을 찾아야 빈 공간에서 커서가 엉뚱한
+  // 봉을 가리키지 않습니다.
+  function updateHoverFromClientX(clientX: number, data: Point[]) {
     const svg = svgRef.current;
-    if (!svg || pointCount < 2) return;
+    if (!svg || data.length < 2) return;
     const rect = svg.getBoundingClientRect();
     if (rect.width === 0) return;
     const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    setHoverIndex(Math.round(ratio * (pointCount - 1)));
+
+    if (range === "D") {
+      const targetMin = MARKET_OPEN_MIN + ratio * MARKET_MINUTES;
+      let nearest = 0;
+      let nearestDist = Infinity;
+      data.forEach((p, i) => {
+        const dist = Math.abs(labelToMinutes(p.label) - targetMin);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearest = i;
+        }
+      });
+      setHoverIndex(nearest);
+    } else {
+      setHoverIndex(Math.round(ratio * (data.length - 1)));
+    }
   }
 
   const toggle = (
@@ -95,9 +138,20 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
     );
   }
 
+  // "일" 구간은 KIS 모의투자가 09:00~15:30 하루치를 통째로 내려주므로, 지금
+  // 시각(KST) 이후 데이터는 잘라냅니다. 실제 시세 앱처럼 지금까지 흐른 만큼만
+  // 그리고 나머지는 빈 채로 남겨두기 위함입니다. 다른 구간(주·월·년)은 봉이
+  // 항상 이미 확정된 과거 값이라 자를 필요가 없습니다.
+  const shown =
+    range === "D"
+      ? points.filter(
+          (p) => labelToMinutes(p.label) <= Math.min(nowKstMinutes(), MARKET_CLOSE_MIN),
+        )
+      : points;
+
   // 점이 하나뿐이면 선이 그려지지 않습니다. 그래프 자리만 비우고 토글은 남깁니다
   // — 구간을 바꿔서 다시 시도할 길을 없애면 안 됩니다.
-  if (points.length < 2) {
+  if (shown.length < 2) {
     return (
       <div>
         <div className="mb-1 flex justify-end">{toggle}</div>
@@ -110,31 +164,34 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
     );
   }
 
-  const values = points.map((p) => p.close);
+  const values = shown.map((p) => p.close);
   const min = Math.min(...values);
   const max = Math.max(...values);
   // 한 구간에서 값이 전혀 안 움직이면 max-min이 0이 되어 0으로 나눕니다.
   const span = max - min || 1;
 
-  const x = (i: number) => (i / (points.length - 1)) * W;
+  // "일"은 하루 중 흐른 시간 비율로 x를 정해 지금 시각까지만 폭을 채우고,
+  // 나머지 구간은 봉 개수를 그대로 등분합니다(이미 하루치가 다 확정돼 있으므로).
+  const x =
+    range === "D"
+      ? (i: number) => ((labelToMinutes(shown[i].label) - MARKET_OPEN_MIN) / MARKET_MINUTES) * W
+      : (i: number) => (i / (shown.length - 1)) * W;
   const y = (v: number) => PAD_Y + (1 - (v - min) / span) * (H - PAD_Y * 2);
 
-  const line = points.map((p, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(p.close)}`).join(" ");
-  const area = `${line} L${W},${H} L0,${H} Z`;
+  const line = shown.map((p, i) => `${i === 0 ? "M" : "L"}${x(i)},${y(p.close)}`).join(" ");
+  const area = `${line} L${x(shown.length - 1)},${H} L${x(0)},${H} Z`;
 
   const rising = values[values.length - 1] >= values[0];
   const stroke = rising ? "#dc2626" : "#2563eb";
   const gradientId = `grad-${stockCode}-${range}`;
   const { window: rangeWindow, unit } = RANGE_TEXT[range];
 
-  const hoverPoint = hoverIndex !== null ? points[hoverIndex] : null;
+  const hoverPoint = hoverIndex !== null ? shown[hoverIndex] : null;
   const hoverX = hoverIndex !== null ? x(hoverIndex) : 0;
   const hoverY = hoverPoint ? y(hoverPoint.close) : 0;
   // 툴팁이 SVG의 좌우 끝을 넘어가면 잘려 보이므로 8~92% 안으로 눌러둡니다.
-  const hoverPct =
-    hoverIndex !== null
-      ? Math.min(92, Math.max(8, (hoverIndex / (points.length - 1)) * 100))
-      : 0;
+  // 인덱스가 아니라 실제 x좌표 비율로 계산해야 "일" 구간(시간 비례 배치)에서도 어긋나지 않습니다.
+  const hoverPct = hoverIndex !== null ? Math.min(92, Math.max(8, (hoverX / W) * 100)) : 0;
 
   return (
     <div>
@@ -169,9 +226,9 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
             } catch {
               // 캡처 없이도 이후 pointermove는 독립적으로 계속 들어옵니다.
             }
-            updateHoverFromClientX(e.clientX, points.length);
+            updateHoverFromClientX(e.clientX, shown);
           }}
-          onPointerMove={(e) => updateHoverFromClientX(e.clientX, points.length)}
+          onPointerMove={(e) => updateHoverFromClientX(e.clientX, shown)}
           onPointerUp={() => setHoverIndex(null)}
           onPointerCancel={() => setHoverIndex(null)}
           onPointerLeave={() => setHoverIndex(null)}
@@ -220,12 +277,12 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
       </div>
 
       <div className="mt-1 flex justify-between text-xs text-neutral-400">
-        <span>{points[0].label}</span>
+        <span>{shown[0].label}</span>
         <span className="tnum">
-          {rangeWindow} · {points.length}
+          {rangeWindow} · {shown.length}
           {unit} · {min.toLocaleString("ko-KR")}~{max.toLocaleString("ko-KR")}원
         </span>
-        <span>{points[points.length - 1].label}</span>
+        <span>{shown[shown.length - 1].label}</span>
       </div>
     </div>
   );
