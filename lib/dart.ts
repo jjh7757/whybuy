@@ -22,11 +22,15 @@ const formatDate = (yyyymmdd: string) =>
  *
  * AI 해석은 부가 기능이므로(예외 2.7과 같은 원칙) 절대 throw하지 않고 실패 시
  * 빈 배열을 돌려줍니다 — 공시를 못 가져와도 시세·주문은 그대로 동작해야 합니다.
+ *
+ * 🔴 `limit` 기본값 3은 AI-1 프롬프트 재료용입니다(재료가 많아지면 잡음·토큰
+ * 낭비). 공시뉴스 탭처럼 더 많이 보여줘야 할 때만 호출부가 큰 값을 넘깁니다.
  */
-export async function getRecentDisclosures(corpCode: string): Promise<Disclosure[]> {
+export async function getRecentDisclosures(corpCode: string, limit = 3): Promise<Disclosure[]> {
   try {
     const today = new Date();
-    const from = new Date(today.getTime() - 180 * 24 * 60 * 60 * 1000);
+    // 연도별로 묶어 보여주려면 최근 180일보다 넉넉한 과거가 필요합니다.
+    const from = new Date(today.getTime() - 3 * 365 * 24 * 60 * 60 * 1000);
     const yyyymmdd = (d: Date) =>
       `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
 
@@ -36,7 +40,7 @@ export async function getRecentDisclosures(corpCode: string): Promise<Disclosure
     url.searchParams.set("bgn_de", yyyymmdd(from));
     url.searchParams.set("end_de", yyyymmdd(today));
     url.searchParams.set("pblntf_ty", "I");
-    url.searchParams.set("page_count", "3");
+    url.searchParams.set("page_count", String(limit));
 
     const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return [];

@@ -18,9 +18,11 @@ export async function GET(request: Request) {
     .eq("stock_code", code)
     .maybeSingle();
 
+  // 화면 탭은 AI 프롬프트 재료(종목당 3건)보다 훨씬 많이 보여줍니다 — 사람이
+  // 직접 훑어보는 목록이라 연도별로 묶어도 그럴듯한 분량이 필요합니다.
   const [disclosures, news]: [Disclosure[], NewsItem[]] = await Promise.all([
-    stock?.dart_corp_code ? getRecentDisclosures(stock.dart_corp_code) : Promise.resolve([]),
-    stock?.stock_name ? getRecentNews(stock.stock_name) : Promise.resolve([]),
+    stock?.dart_corp_code ? getRecentDisclosures(stock.dart_corp_code, 30) : Promise.resolve([]),
+    stock?.stock_name ? getRecentNews(stock.stock_name, 20) : Promise.resolve([]),
   ]);
 
   return NextResponse.json({ disclosures, news });
