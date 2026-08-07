@@ -28,6 +28,9 @@ export async function GET() {
       allocated: p.allocated,
       spent: p.spent,
       remaining: p.remaining,
+      // 매도 폼의 수량 상한용입니다. getMyPortfolio는 KIS를 부르지 않으므로
+      // (Supabase 조회뿐) 여기서 같이 내려줘도 이 라우트의 존재 이유가 깨지지 않습니다.
+      availableToSell: p.availableToSell,
     });
   } catch (err) {
     console.error("[/api/budget]", err);

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { REASON_TYPES } from "@/lib/rationale";
+import { BUY_REASON_TYPES, SELL_REASON_TYPES } from "@/lib/rationale";
 import { isValidTickPrice, priceTickSize } from "@/lib/market";
 import { AiExplain } from "@/components/AiExplain";
 import { DividendInfo } from "@/components/DividendInfo";
@@ -145,15 +145,20 @@ export function TradeFlow() {
   const [infoTab, setInfoTab] = useState<"chart" | "info">("chart");
 
   // 주문 폼
+  const [side, setSide] = useState<"buy" | "sell">("buy");
   const [qty, setQty] = useState("");
   const [reasonType, setReasonType] = useState("");
   const [reasonMemo, setReasonMemo] = useState("");
   const [orderType, setOrderType] = useState<"market" | "limit">("market");
   const [limitPrice, setLimitPrice] = useState("");
+  const reasonOptions = side === "sell" ? SELL_REASON_TYPES : BUY_REASON_TYPES;
 
   // 확인 모달
   const [confirming, setConfirming] = useState(false);
   const [remaining, setRemaining] = useState<number | null>(null);
+  // 이 종목을 지금 몇 주까지 팔 수 있는지 — /api/budget이 getMyPortfolio를 그대로
+  // 재사용해 내려주므로(KIS 호출 없음) 시세 조회와 겹쳐도 한도(EGW00201)에 안 걸립니다.
+  const [holdingQty, setHoldingQty] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<OrderResult | null>(null);
   const restoredRef = useRef(false);
@@ -260,6 +265,7 @@ export function TradeFlow() {
     setNotFound(false);
     setSelected(stock);
     setInfoTab("chart");
+    setSide("buy");
     setQty("");
     setReasonType("");
     setReasonMemo("");
@@ -267,13 +273,35 @@ export function TradeFlow() {
     setLimitPrice("");
     setResult(null);
     fetchQuote(stock.stock_code);
-    // 수량 퀵버튼이 남은 예산을 기준으로 계산하므로 미리 받아둡니다.
+    // 수량 퀵버튼이 남은 예산·보유수량을 기준으로 계산하므로 미리 받아둡니다.
     // KIS를 부르지 않는 요청이라 시세 조회와 겹쳐도 한도에 영향이 없습니다.
-    if (userId) fetchRemaining();
+    if (userId) fetchRemaining(stock.stock_code);
   }
 
+  // 계좌 화면에서 보유 종목을 클릭해 넘어온 경우, URL의 code로 그 종목을 바로 선택합니다.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    if (!code) return;
+    selectStock({ stock_code: code, stock_name: params.get("name") ?? code, market: "" });
+    // 마운트 시 한 번만 확인합니다 — URL을 기준으로 진입할 때만 씁니다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 🔴 URL로 바로 진입한 경우(위 effect) 마운트 시점엔 로그인 여부를 아직 몰라
+  // selectStock의 fetchRemaining이 건너뛰어집니다. 로그인 확인이 뒤늦게 끝나면
+  // 그때 다시 한번 받아와야 "매도" 토글이 보유 종목에서 정상적으로 나타납니다.
+  useEffect(() => {
+    if (userId && selected) fetchRemaining(selected.stock_code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
   const qtyNum = Number(qty);
-  const validQty = qty.trim() !== "" && Number.isInteger(qtyNum) && qtyNum > 0;
+  const validQty =
+    qty.trim() !== "" &&
+    Number.isInteger(qtyNum) &&
+    qtyNum > 0 &&
+    (side === "buy" || qtyNum <= holdingQty);
   const limitPriceNum = Number(limitPrice);
   const validLimitPrice =
     orderType === "market" ||
@@ -285,22 +313,25 @@ export function TradeFlow() {
   const expectedAmount = validQty && validLimitPrice && quote ? qtyNum * effectivePrice : 0;
   const canSubmit = validQty && validLimitPrice && reasonType !== "" && quote !== null;
 
-  async function fetchRemaining() {
+  async function fetchRemaining(stockCode?: string) {
     try {
       const res = await fetch("/api/budget");
       const data = await res.json();
       const value = data.loggedIn ? data.remaining : null;
       setRemaining(value);
+      const code = stockCode ?? selected?.stock_code;
+      setHoldingQty(code && data.loggedIn ? (data.availableToSell?.[code] ?? 0) : 0);
       return value as number | null;
     } catch {
       setRemaining(null);
+      setHoldingQty(0);
       return null;
     }
   }
 
   async function openConfirm() {
     setResult(null);
-    await fetchRemaining();
+    await fetchRemaining(selected?.stock_code);
     setConfirming(true);
   }
 
@@ -338,6 +369,7 @@ export function TradeFlow() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           stockCode: selected.stock_code,
+          side,
           qty: qtyNum,
           reasonType,
           reasonMemo,
@@ -354,6 +386,7 @@ export function TradeFlow() {
         setReasonMemo("");
         setOrderType("market");
         setLimitPrice("");
+        fetchRemaining(selected.stock_code);
       } else {
         setResult({ kind: "failed", message: data.message ?? "주문에 실패했습니다." });
       }
@@ -587,12 +620,50 @@ export function TradeFlow() {
             <div className="flex flex-col gap-4 rounded-xl border border-neutral-200 bg-white p-5 lg:sticky lg:top-20">
               <div className="flex items-baseline justify-between">
                 <h3 className="font-bold">주문</h3>
-                {remaining !== null && (
+                {side === "buy" && remaining !== null && (
                   <span className="tnum text-xs text-neutral-400">
                     남은 예산 {won(remaining)}
                   </span>
                 )}
+                {side === "sell" && (
+                  <span className="tnum text-xs text-neutral-400">
+                    보유 {holdingQty}주
+                  </span>
+                )}
               </div>
+
+              {/* 🔴 보유하지 않은 종목은 팔 수 없으니, 이 종목을 실제로 갖고 있을
+                  때만 매도 토글을 보여줍니다 — 없으면 눌러봤자 막힐 버튼입니다. */}
+              {holdingQty > 0 && (
+                <div className="flex gap-1.5">
+                  {(
+                    [
+                      { value: "buy", label: "매수" },
+                      { value: "sell", label: "매도" },
+                    ] as const
+                  ).map((t) => (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => {
+                        setSide(t.value);
+                        setQty("");
+                        setReasonType("");
+                      }}
+                      aria-pressed={side === t.value}
+                      className={`flex-1 rounded-lg py-1.5 text-sm font-medium transition ${
+                        side === t.value
+                          ? t.value === "buy"
+                            ? "bg-red-600 text-white"
+                            : "bg-blue-600 text-white"
+                          : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div className="flex gap-1.5">
                 {(
@@ -660,6 +731,7 @@ export function TradeFlow() {
                   <input
                     type="number"
                     min={1}
+                    max={side === "sell" ? holdingQty : undefined}
                     value={qty}
                     onChange={(e) => setQty(e.target.value)}
                     placeholder="0"
@@ -667,8 +739,9 @@ export function TradeFlow() {
                   />
                 </label>
 
-                {/* 남은 예산으로 몇 주까지 살 수 있는지 초보자가 직접 나눌 필요가 없게 합니다. */}
-                {remaining !== null && (
+                {/* 매수는 남은 예산, 매도는 보유수량 기준으로 몇 주까지 되는지
+                    초보자가 직접 나눌 필요가 없게 합니다. */}
+                {side === "buy" && remaining !== null && (
                   <div className="grid grid-cols-4 gap-1.5">
                     {[10, 25, 50, 100].map((pct) => {
                       const affordable =
@@ -690,15 +763,38 @@ export function TradeFlow() {
                   </div>
                 )}
 
+                {side === "sell" && (
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[10, 25, 50, 100].map((pct) => {
+                      const q = Math.floor(holdingQty * (pct / 100));
+                      return (
+                        <button
+                          key={pct}
+                          type="button"
+                          disabled={q < 1}
+                          onClick={() => setQty(String(q))}
+                          className="rounded-lg border border-neutral-200 py-1.5 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {pct === 100 ? "전량" : `${pct}%`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {qty.trim() !== "" && !validQty && (
                   <span className="text-xs text-red-600">
-                    1주 이상의 정수로 입력해주세요.
+                    {side === "sell" && Number.isInteger(qtyNum) && qtyNum > holdingQty
+                      ? `보유수량(${holdingQty}주)보다 많습니다.`
+                      : "1주 이상의 정수로 입력해주세요."}
                   </span>
                 )}
               </div>
 
               <div className="flex items-baseline justify-between border-y border-neutral-100 py-3">
-                <span className="text-sm text-neutral-500">예상 주문금액</span>
+                <span className="text-sm text-neutral-500">
+                  {side === "sell" ? "예상 정산금액" : "예상 주문금액"}
+                </span>
                 <span className="tnum font-bold">
                   {validQty ? won(expectedAmount) : "—"}
                 </span>
@@ -706,9 +802,9 @@ export function TradeFlow() {
 
               <fieldset className="flex flex-col gap-1 text-sm" data-tutorial="reason">
                 <legend className="mb-1.5 font-medium">
-                  이 종목을 사려는 근거는 무엇인가요?
+                  이 종목을 {side === "sell" ? "팔려는" : "사려는"} 근거는 무엇인가요?
                 </legend>
-                {REASON_TYPES.map((r) => (
+                {reasonOptions.map((r) => (
                   <label
                     key={r.value}
                     className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 transition ${
@@ -741,9 +837,11 @@ export function TradeFlow() {
                 onClick={handleOrderClick}
                 disabled={!canSubmit}
                 data-tutorial="submit"
-                className="w-full rounded-xl bg-red-600 py-3 font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-neutral-400"
+                className={`w-full rounded-xl py-3 font-bold text-white transition disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-neutral-400 ${
+                  side === "sell" ? "bg-blue-600 hover:bg-blue-700" : "bg-red-600 hover:bg-red-700"
+                }`}
               >
-                주문하기
+                {side === "sell" ? "매도 주문하기" : "매수 주문하기"}
               </button>
 
               {/* 🔴 버튼을 왜 못 누르는지 말해주지 않으면 사용자는 고장으로 봅니다. */}
@@ -780,11 +878,12 @@ export function TradeFlow() {
       {confirming && selected && quote && (
         <ConfirmModal
           stockName={selected.stock_name}
+          side={side}
           qty={qtyNum}
           orderType={orderType}
           price={effectivePrice}
           expectedAmount={expectedAmount}
-          reasonLabel={REASON_TYPES.find((r) => r.value === reasonType)?.label ?? ""}
+          reasonLabel={reasonOptions.find((r) => r.value === reasonType)?.label ?? ""}
           remaining={remaining}
           submitting={submitting}
           onCancel={() => setConfirming(false)}
@@ -797,6 +896,7 @@ export function TradeFlow() {
 
 function ConfirmModal({
   stockName,
+  side,
   qty,
   orderType,
   price,
@@ -808,6 +908,7 @@ function ConfirmModal({
   onConfirm,
 }: {
   stockName: string;
+  side: "buy" | "sell";
   qty: number;
   orderType: "market" | "limit";
   price: number;
@@ -818,12 +919,14 @@ function ConfirmModal({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const after = remaining === null ? null : remaining - expectedAmount;
+  // 매도는 정산 대금이 예산에 더해지고, 매수는 그만큼 빠집니다.
+  const after =
+    remaining === null ? null : side === "sell" ? remaining + expectedAmount : remaining - expectedAmount;
   const priceLabel = orderType === "market" ? "시장가" : `지정가 ${won(price)}`;
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-lg">
-        <h3 className="font-medium">주문을 확인해주세요</h3>
+        <h3 className="font-medium">{side === "sell" ? "매도" : "매수"} 주문을 확인해주세요</h3>
         <p className="mt-3 text-sm leading-relaxed">
           {stockName} {qty}주 · {priceLabel} · 예상 {won(expectedAmount)} · 근거: {reasonLabel}
           {orderType === "limit" && (

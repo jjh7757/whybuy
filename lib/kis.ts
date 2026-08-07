@@ -210,11 +210,12 @@ type OrderResponse = KisResultEnvelope & {
 };
 
 /**
- * 국내주식 매수주문을 넣습니다(모의투자, 예외 2.8용). `limitPrice`가 없으면
- * 시장가, 있으면 그 가격의 지정가 주문입니다.
+ * 국내주식 현금 주문을 넣습니다(모의투자, 예외 2.8용). `limitPrice`가 없으면
+ * 시장가, 있으면 그 가격의 지정가 주문입니다. 매수·매도는 tr_id만 다르고
+ * 나머지 요청 형태(같은 엔드포인트, 같은 body, hashkey 필요)는 동일합니다.
  *
  * 🔴 hashkey를 붙인 조합으로 실주문 성공을 검증했습니다(2026-08-06 15:16 KST,
- * 주문번호 0000041001). hashkey 없이도 되는지는 확인하지 않았으므로 그대로 둡니다.
+ * 매수 주문번호 0000041001). hashkey 없이도 되는지는 확인하지 않았으므로 그대로 둡니다.
  *
  * rt_cd !== "0"이면 throw합니다. HTTP 상태는 200이라 callKis의 !res.ok 분기로는
  * 걸러지지 않고, 반드시 이 함수가 rt_cd를 직접 검사해야 합니다.
@@ -222,7 +223,8 @@ type OrderResponse = KisResultEnvelope & {
  * 🔴 응답의 `KRX_FWDG_ORD_ORGNO`(한국거래소전송주문조직번호)는 나중에 이 주문을
  * 취소/정정할 때 원주문번호(ODNO)와 함께 반드시 있어야 하는 값이라 같이 반환합니다.
  */
-export async function placeBuyOrder(
+async function placeCashOrder(
+  trId: string,
   stockCode: string,
   qty: number,
   limitPrice?: number,
@@ -249,7 +251,7 @@ export async function placeBuyOrder(
   const hash = hashRes.ok ? ((await hashRes.json()) as { HASH?: string }).HASH : undefined;
 
   const data = (await callKis("/uapi/domestic-stock/v1/trading/order-cash", {
-    trId: "VTTC0802U",
+    trId,
     method: "POST",
     body,
     hashkey: hash,
@@ -264,6 +266,24 @@ export async function placeBuyOrder(
     orderTime: data.output.ORD_TMD,
     krxFwdgOrdOrgno: data.output.KRX_FWDG_ORD_ORGNO,
   };
+}
+
+export function placeBuyOrder(stockCode: string, qty: number, limitPrice?: number) {
+  return placeCashOrder("VTTC0802U", stockCode, qty, limitPrice);
+}
+
+/**
+ * 국내주식 매도주문을 넣습니다(모의투자). tr_id만 매수(VTTC0802U)와 다릅니다.
+ *
+ * 🔴 이 서비스는 KIS 실계좌 잔고를 조회해 매도 가능 수량을 검증하지 않습니다
+ * (lib/portfolio.ts 참고 — 모의계좌 1개를 여러 사용자가 나눠 쓰므로 실계좌
+ * 잔고에는 다른 사용자의 보유분이 섞여 있음). 대신 이 서비스의 `orders` 테이블에
+ * 기록된, 그 사용자가 이 서비스로 직접 매수해 체결된 수량만을 기준으로
+ * app/api/order/route.ts에서 미리 막는다. 그래도 KIS가 실제로 거부하면(예:
+ * 공유 계좌의 실제 보유수량 불일치) 그 거부는 그대로 사용자에게 전달된다.
+ */
+export function placeSellOrder(stockCode: string, qty: number, limitPrice?: number) {
+  return placeCashOrder("VTTC0801U", stockCode, qty, limitPrice);
 }
 
 type QuoteResponse = {

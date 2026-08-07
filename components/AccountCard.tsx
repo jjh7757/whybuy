@@ -236,28 +236,33 @@ export function AccountCard() {
             />
           </div>
 
-          <ul className="flex flex-col gap-2 text-sm">
+          <ul className="flex flex-col gap-1 text-sm">
             {account.holdings.map((h) => (
-              <li key={h.stockCode} className="flex justify-between gap-2">
-                <span>
-                  {h.stockName} · {h.qty}주
-                  <span className="ml-1 text-neutral-400">
-                    (체결가 {won(h.avgOrderPrice)})
-                  </span>
-                </span>
-                <span
-                  className={
-                    h.profitLoss === null
-                      ? "text-neutral-400"
-                      : h.profitLoss >= 0
-                        ? "text-red-600"
-                        : "text-blue-600"
-                  }
+              <li key={h.stockCode}>
+                <Link
+                  href={`/trade?code=${h.stockCode}&name=${encodeURIComponent(h.stockName)}`}
+                  className="-mx-2 flex justify-between gap-2 rounded-lg px-2 py-1 transition hover:bg-neutral-50"
                 >
-                  {h.evalAmount === null
-                    ? "—"
-                    : `${won(h.evalAmount)} (${h.profitLossRate!.toFixed(2)}%)`}
-                </span>
+                  <span>
+                    {h.stockName} · {h.qty}주
+                    <span className="ml-1 text-neutral-400">
+                      (체결가 {won(h.avgOrderPrice)})
+                    </span>
+                  </span>
+                  <span
+                    className={
+                      h.profitLoss === null
+                        ? "text-neutral-400"
+                        : h.profitLoss >= 0
+                          ? "text-red-600"
+                          : "text-blue-600"
+                    }
+                  >
+                    {h.evalAmount === null
+                      ? "—"
+                      : `${won(h.evalAmount)} (${h.profitLossRate!.toFixed(2)}%)`}
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>

@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getQuote, getBuyableCash, placeBuyOrder } from "@/lib/kis";
+import { getQuote, getBuyableCash, placeBuyOrder, placeSellOrder } from "@/lib/kis";
 import { isMarketOpen, isValidTickPrice } from "@/lib/market";
-import { REASON_TYPES } from "@/lib/rationale";
+import { BUY_REASON_TYPES, SELL_REASON_TYPES } from "@/lib/rationale";
 import { logEvent } from "@/lib/events";
 import { DEFAULT_ALLOCATED_AMOUNT, getMyPortfolio } from "@/lib/portfolio";
 
 export const dynamic = "force-dynamic";
 
-const REASON_VALUES = new Set<string>(REASON_TYPES.map((r) => r.value));
+const BUY_REASON_VALUES = new Set<string>(BUY_REASON_TYPES.map((r) => r.value));
+const SELL_REASON_VALUES = new Set<string>(SELL_REASON_TYPES.map((r) => r.value));
 
 type Body = {
   stockCode?: string;
+  side?: "buy" | "sell";
   qty?: number;
   reasonType?: string;
   reasonMemo?: string;
@@ -21,12 +23,16 @@ type Body = {
 };
 
 /**
- * 흐름 D 9~17단계. 매수 주문을 접수합니다.
+ * 흐름 D 9~17단계. 매수·매도 주문을 접수합니다.
  *
- * 🔴 검증 순서가 기획서 순서입니다: 로그인 → 장 시간 → 중복 → 가상 예산 →
- * 실제 예수금 → KIS 접수. 가상 예산을 실제 예수금보다 먼저 보는 이유는,
- * 가상 예산이 "사용자 1명이 계좌를 몰아 쓰는 것"을 막는 1차 방어선이고
+ * 🔴 검증 순서가 기획서 순서입니다: 로그인 → 장 시간 → 중복 → 가상 예산(매도는
+ * 보유수량) → 실제 예수금 → KIS 접수. 가상 예산을 실제 예수금보다 먼저 보는
+ * 이유는, 가상 예산이 "사용자 1명이 계좌를 몰아 쓰는 것"을 막는 1차 방어선이고
  * 실제 예수금 확인은 계좌 전체를 지키는 최종 방어선이기 때문입니다.
+ *
+ * 🔴 매도는 실제 예수금 검증이 없습니다 — 파는 데는 현금이 필요 없고, 실제
+ * 보유수량 부족은 KIS가 거부하면 그대로 사용자에게 전달됩니다(lib/kis.ts의
+ * placeSellOrder 주석 참고).
  */
 export async function POST(request: Request) {
   let body: Body;
@@ -40,11 +46,13 @@ export async function POST(request: Request) {
   }
 
   const stockCode = body.stockCode;
+  const side = body.side === "sell" ? "sell" : "buy";
   const qty = Number(body.qty);
   const reasonType = body.reasonType;
   const reasonMemo = body.reasonMemo?.trim() || null;
   const orderType = body.orderType === "limit" ? "limit" : "market";
   const limitPrice = orderType === "limit" ? Number(body.limitPrice) : null;
+  const reasonValues = side === "sell" ? SELL_REASON_VALUES : BUY_REASON_VALUES;
 
   // 예외 2.9는 클라이언트가 버튼을 비활성화해 막지만, 서버도 독립적으로 검증합니다.
   if (
@@ -53,7 +61,7 @@ export async function POST(request: Request) {
     !Number.isInteger(qty) ||
     qty <= 0 ||
     !reasonType ||
-    !REASON_VALUES.has(reasonType) ||
+    !reasonValues.has(reasonType) ||
     (orderType === "limit" &&
       (!Number.isInteger(limitPrice) || !isValidTickPrice(limitPrice as number)))
   ) {
@@ -98,12 +106,15 @@ export async function POST(request: Request) {
     );
   }
 
-  // 예외 2.6 — 중복 주문(60초 내 동일 종목·동일 수량)
+  // 예외 2.6 — 중복 주문(60초 내 동일 종목·동일 수량·동일 방향)
+  // 🔴 side도 조건에 넣습니다 — 안 넣으면 "5주 매수" 직후 "5주 매도"를
+  // 같은 주문의 중복으로 오인해 정상적인 매도를 막아버립니다.
   const { data: recent } = await supabase
     .from("orders")
     .select("id")
     .eq("user_id", user.id)
     .eq("stock_code", stockCode)
+    .eq("side", side)
     .eq("qty", qty)
     .gt("created_at", new Date(Date.now() - 60_000).toISOString())
     .limit(1)
@@ -151,46 +162,65 @@ export async function POST(request: Request) {
 
   // 대기중인 지정가 주문도 예산을 묶어두므로, 단순 합산이 아니라 getMyPortfolio의
   // 규칙(lib/portfolio.ts)을 그대로 재사용해 일관성을 맞춥니다.
-  const { remaining } = await getMyPortfolio(supabase, user.id);
+  const { remaining, availableToSell } = await getMyPortfolio(supabase, user.id);
 
-  // 예외 2.11 — 가상 예산 초과 (실제 예수금과 무관한 사용자별 1차 방어선)
-  if (expectedAmount > remaining) {
-    await logEvent("order_rejected_budget_exceeded", "operation", {
-      user_id: user.id,
-      requested_amount: expectedAmount,
-      remaining,
-    });
-    return NextResponse.json({
-      ok: false,
-      code: "budget_exceeded",
-      message: `가상 예산을 초과했습니다. 남은 한도 ${remaining.toLocaleString("ko-KR")}원. 수량을 줄여보세요.`,
-      remaining,
-    });
-  }
+  if (side === "sell") {
+    // 매도는 가상 예산이 아니라 "이 서비스로 실제 보유한 수량"이 한도입니다.
+    const sellable = availableToSell[stockCode] ?? 0;
+    if (qty > sellable) {
+      await logEvent("order_rejected_oversell", "operation", {
+        user_id: user.id,
+        stock_code: stockCode,
+        requested_qty: qty,
+        sellable,
+      });
+      return NextResponse.json({
+        ok: false,
+        code: "oversell",
+        message: `보유수량을 초과했습니다. 지금 팔 수 있는 수량은 ${sellable}주입니다.`,
+      });
+    }
+  } else {
+    // 예외 2.11 — 가상 예산 초과 (실제 예수금과 무관한 사용자별 1차 방어선)
+    if (expectedAmount > remaining) {
+      await logEvent("order_rejected_budget_exceeded", "operation", {
+        user_id: user.id,
+        requested_amount: expectedAmount,
+        remaining,
+      });
+      return NextResponse.json({
+        ok: false,
+        code: "budget_exceeded",
+        message: `가상 예산을 초과했습니다. 남은 한도 ${remaining.toLocaleString("ko-KR")}원. 수량을 줄여보세요.`,
+        remaining,
+      });
+    }
 
-  // 예외 2.5 — 실제 계좌 예수금 부족 (계좌 전체를 지키는 최종 방어선)
-  let buyableCash: number;
-  try {
-    buyableCash = await getBuyableCash(stockCode);
-  } catch (err) {
-    console.error("[/api/order] 매수가능조회 실패", err);
-    return NextResponse.json(
-      { ok: false, code: "quote_failed", message: "계좌 상태를 확인하지 못했습니다." },
-      { status: 502 },
-    );
-  }
-  if (expectedAmount > buyableCash) {
-    await logEvent("order_rejected_insufficient_funds", "operation", {
-      user_id: user.id,
-      stock_code: stockCode,
-      requested_amount: expectedAmount,
-      buyable_cash: buyableCash,
-    });
-    return NextResponse.json({
-      ok: false,
-      code: "insufficient_funds",
-      message: `예수금이 부족합니다. 현재 ${buyableCash.toLocaleString("ko-KR")}원, 필요 ${expectedAmount.toLocaleString("ko-KR")}원. 수량을 줄여보세요.`,
-    });
+    // 예외 2.5 — 실제 계좌 예수금 부족 (계좌 전체를 지키는 최종 방어선). 매도는
+    // 현금이 아니라 보유수량이 한도이므로 이 검증이 필요 없습니다.
+    let buyableCash: number;
+    try {
+      buyableCash = await getBuyableCash(stockCode);
+    } catch (err) {
+      console.error("[/api/order] 매수가능조회 실패", err);
+      return NextResponse.json(
+        { ok: false, code: "quote_failed", message: "계좌 상태를 확인하지 못했습니다." },
+        { status: 502 },
+      );
+    }
+    if (expectedAmount > buyableCash) {
+      await logEvent("order_rejected_insufficient_funds", "operation", {
+        user_id: user.id,
+        stock_code: stockCode,
+        requested_amount: expectedAmount,
+        buyable_cash: buyableCash,
+      });
+      return NextResponse.json({
+        ok: false,
+        code: "insufficient_funds",
+        message: `예수금이 부족합니다. 현재 ${buyableCash.toLocaleString("ko-KR")}원, 필요 ${expectedAmount.toLocaleString("ko-KR")}원. 수량을 줄여보세요.`,
+      });
+    }
   }
 
   // 여기까지 통과하면 주문을 만듭니다. RLS의 "orders insert own"이
@@ -201,6 +231,7 @@ export async function POST(request: Request) {
       user_id: user.id,
       stock_code: stockCode,
       stock_name: stock.stock_name,
+      side,
       qty,
       expected_price: price,
       expected_amount: expectedAmount,
@@ -230,7 +261,8 @@ export async function POST(request: Request) {
   });
 
   try {
-    const { orderNo, krxFwdgOrdOrgno } = await placeBuyOrder(
+    const place = side === "sell" ? placeSellOrder : placeBuyOrder;
+    const { orderNo, krxFwdgOrdOrgno } = await place(
       stockCode,
       qty,
       orderType === "limit" ? (limitPrice as number) : undefined,
@@ -255,6 +287,7 @@ export async function POST(request: Request) {
 
     await logEvent("order_submitted", "domain", {
       stock_code: stockCode,
+      side,
       qty,
       expected_price: price,
       order_no: orderNo,
@@ -280,7 +313,7 @@ export async function POST(request: Request) {
       })
       .eq("id", orderRow.id);
 
-    await logEvent("order_rejected", "domain", { stock_code: stockCode, qty, reason });
+    await logEvent("order_rejected", "domain", { stock_code: stockCode, side, qty, reason });
 
     return NextResponse.json({
       ok: false,
