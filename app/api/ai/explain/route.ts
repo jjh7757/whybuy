@@ -5,6 +5,8 @@ import { logEvent } from "@/lib/events";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getMyPortfolio } from "@/lib/portfolio";
+import { getRecentDisclosures } from "@/lib/dart";
+import { getRecentNews } from "@/lib/news";
 
 export const dynamic = "force-dynamic";
 
@@ -97,17 +99,39 @@ ${holdingsText}
 }
 
 async function buildQuotePrompt(stockCode: string): Promise<Built> {
-  const q = await getQuote(stockCode);
-
   const supabase = createAdminClient();
   const { data: stock } = await supabase
     .from("stocks")
-    .select("stock_name")
+    .select("stock_name, dart_corp_code")
     .eq("stock_code", stockCode)
     .maybeSingle();
 
+  // 시세(KIS)·공시(DART)·뉴스(Google) 세 소스는 서로 무관해 병렬로 받습니다.
+  // 공시·뉴스는 해석 재료일 뿐이라, 둘 다 실패해도 시세만으로 해석이 나가야
+  // 합니다 — 각 함수가 자체적으로 실패를 삼키고 빈 배열을 돌려줍니다.
+  const [q, disclosures, news] = await Promise.all([
+    getQuote(stockCode),
+    stock?.dart_corp_code ? getRecentDisclosures(stock.dart_corp_code) : Promise.resolve([]),
+    stock?.stock_name ? getRecentNews(stock.stock_name) : Promise.resolve([]),
+  ]);
+
   const hasMissing = [q.per, q.pbr, q.eps, q.bps].some((v) => v === null);
 
+  // 🔴 공시·뉴스는 "있었던 일" 재료일 뿐입니다. 매수·매도 판단으로 이어지면
+  // SAFETY_RULES와 이 프로젝트의 목적(AI가 대신 판단해주지 않기)이 깨지므로,
+  // 자료가 있을 때만 별도 금지 규칙과 출력 줄을 추가합니다.
+  const newsMaterial = [...disclosures, ...news];
+  const newsBlock =
+    newsMaterial.length > 0
+      ? `
+최근 공시·뉴스 (사실 정보일 뿐입니다):
+${disclosures.map((d) => `- [공시 ${d.date}] ${d.title}`).join("\n")}
+${news.map((n) => `- [뉴스 ${n.date}] ${n.title}`).join("\n")}
+
+🔴 위 공시·뉴스는 "이런 일이 있었다"는 사실로만 언급하십시오. 이 내용이 좋은 소식인지
+나쁜 소식인지 평가하거나, 이것 때문에 사야 한다·팔아야 한다고 이어가지 마십시오.
+`
+      : "";
 
   const prompt = `당신은 모의투자를 막 시작한 초보자에게 종목 시세 화면의 숫자를 설명하는 역할입니다.
 
@@ -124,7 +148,7 @@ ${SAFETY_RULES}
 - PBR: ${q.pbr === null ? "—" : `${q.pbr}배`}
 - EPS(주당순이익): ${q.eps === null ? "—" : won(q.eps)}
 - BPS(주당순자산): ${q.bps === null ? "—" : won(q.bps)}
-
+${newsBlock}
 각 숫자가 무엇을 뜻하는지 초보자가 이해할 수 있게 한국어로 설명하십시오.
 PER과 PBR은 각각 무엇을 주가와 비교한 값인지 이 종목의 실제 숫자로 풀어서 알려주십시오.
 🔴 지표가 높다·낮다는 사실은 말해도 되지만, 그것이 비싸다·싸다 또는 고평가·저평가라고 단정하지 마십시오.
@@ -143,10 +167,14 @@ ${
       : ""
   }${hasMissing ? "값이 없는 지표는 화면에 '—'로 표시되어 있습니다. 왜 비어 있을 수 있는지 짧게만 언급하십시오.\n" : "모든 지표에 값이 있으므로 값이 없는 경우를 가정해 설명하지 마십시오.\n"}이 종목을 사야 하는지 팔아야 하는지는 절대 언급하지 마십시오.
 
-🔴 출력 형식을 정확히 지키십시오. 아래 세 줄만 출력합니다.
+🔴 출력 형식을 정확히 지키십시오. 아래 ${newsMaterial.length > 0 ? "네" : "세"} 줄만 출력합니다.
 오늘 가격|(현재가·전일대비·시가·고가·저가·거래량을 2~3문장으로)
 기업 가치 지표|(PER·PBR·EPS·BPS를 2~3문장으로)
-읽을 때 주의|(같은 값도 업종·시점에 따라 달라진다는 점을 1~2문장으로)
+읽을 때 주의|(같은 값도 업종·시점에 따라 달라진다는 점을 1~2문장으로)${
+    newsMaterial.length > 0
+      ? "\n최근 소식|(위 공시·뉴스 중 있었던 사실만 2~3문장으로. 평가나 전망은 넣지 마십시오)"
+      : ""
+  }
 
 각 줄은 '제목|내용' 형태이며 제목은 위에 적힌 그대로 씁니다.
 줄 안에서 줄바꿈하지 말고, 세로줄(|)은 제목 뒤 한 번만 쓰며,
