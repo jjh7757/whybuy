@@ -11,6 +11,7 @@ import { FinancialRatios } from "@/components/FinancialRatios";
 import { PopularStocks } from "@/components/PopularStocks";
 import { PriceChart } from "@/components/PriceChart";
 import { RangeBar } from "@/components/RangeBar";
+import { Tutorial, useTutorial, type TutorialStep } from "@/components/Tutorial";
 
 type StockOption = { stock_code: string; stock_name: string; market: string };
 type Quote = {
@@ -61,6 +62,47 @@ const EXAMPLES: StockOption[] = [
 ];
 
 const DRAFT_KEY = "whybuy:pending-order";
+const TUTORIAL_KEY = "whybuy:tutorial-done";
+
+const TUTORIAL_STEPS: TutorialStep[] = [
+  {
+    id: "search",
+    selector: '[data-tutorial="search"]',
+    title: "종목 찾기",
+    body: "종목명을 검색하거나, 아래 인기 종목에서 골라보세요.",
+  },
+  {
+    id: "stockSelected",
+    selector: '[data-tutorial="stockSelected"]',
+    title: "하나 골라볼까요?",
+    body: "인기 종목 중 하나를 눌러보세요.",
+    waitForAction: true,
+  },
+  {
+    id: "quote",
+    selector: '[data-tutorial="quote"]',
+    title: "지금 얼마인가요",
+    body: "현재가와 등락률이에요. 아래 차트·재무·배당 정보로 판단해보세요.",
+  },
+  {
+    id: "qty",
+    selector: '[data-tutorial="qty"]',
+    title: "수량 정하기",
+    body: "몇 주 살지 입력하세요. 예산 퍼센트 버튼으로 자동 계산할 수도 있어요.",
+  },
+  {
+    id: "reason",
+    selector: '[data-tutorial="reason"]',
+    title: "왜 사려고 하나요",
+    body: "근거를 골라야 주문할 수 있어요. 나중에 지난 근거 화면에서 되돌아볼 수 있습니다.",
+  },
+  {
+    id: "submit",
+    selector: '[data-tutorial="submit"]',
+    title: "주문하기",
+    body: "다 채웠다면 눌러보세요. 로그인이 안 돼 있으면 로그인부터 진행돼요.",
+  },
+];
 
 type Draft = {
   stockCode: string;
@@ -107,6 +149,7 @@ export function TradeFlow() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<OrderResult | null>(null);
   const restoredRef = useRef(false);
+  const tutorial = useTutorial(TUTORIAL_STEPS, TUTORIAL_KEY);
 
   // 로그인 상태를 구독하고, 로그인된 시점에 대기 중인 주문 초안이 있으면 복원합니다.
   //
@@ -204,6 +247,7 @@ export function TradeFlow() {
   }
 
   function selectStock(stock: StockOption) {
+    tutorial.notify("stockSelected");
     setCandidates(null);
     setNotFound(false);
     setSelected(stock);
@@ -315,21 +359,34 @@ export function TradeFlow() {
 
   return (
     <div className="flex flex-col gap-6">
-      <form onSubmit={search} className="flex gap-2">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="종목명을 입력하세요 (예: 삼성전자)"
-          className="flex-1 rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm outline-none transition placeholder:text-neutral-400 focus:border-neutral-900"
-        />
-        <button
-          type="submit"
-          disabled={searching}
-          className="rounded-xl bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-neutral-700 disabled:opacity-50"
-        >
-          검색
-        </button>
-      </form>
+      <Tutorial tutorial={tutorial} />
+
+      <div className="flex items-center justify-between gap-2">
+        <form onSubmit={search} data-tutorial="search" className="flex flex-1 gap-2">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="종목명을 입력하세요 (예: 삼성전자)"
+            className="flex-1 rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm outline-none transition placeholder:text-neutral-400 focus:border-neutral-900"
+          />
+          <button
+            type="submit"
+            disabled={searching}
+            className="rounded-xl bg-neutral-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-neutral-700 disabled:opacity-50"
+          >
+            검색
+          </button>
+        </form>
+        {!tutorial.active && (
+          <button
+            type="button"
+            onClick={tutorial.start}
+            className="shrink-0 text-xs text-neutral-400 underline-offset-2 transition hover:text-neutral-700 hover:underline"
+          >
+            둘러보기 다시 보기
+          </button>
+        )}
+      </div>
 
       {searchError && (
         <p className="text-sm text-red-600">검색하지 못했습니다. 다시 시도해주세요.</p>
@@ -375,7 +432,9 @@ export function TradeFlow() {
 
       {/* 검색·후보·선택이 모두 없는 첫 상태에서만 인기 종목을 보여줍니다. */}
       {!selected && !candidates && !notFound && (
-        <PopularStocks onSelect={selectStock} />
+        <div data-tutorial="stockSelected">
+          <PopularStocks onSelect={selectStock} />
+        </div>
       )}
 
       {selected && (
@@ -416,7 +475,7 @@ export function TradeFlow() {
 
             {quote && (
               <>
-                <div>
+                <div data-tutorial="quote">
                   <div className="tnum text-3xl font-bold">{won(quote.price)}</div>
                   <div
                     className={`tnum mt-1 text-sm font-medium ${
@@ -584,7 +643,7 @@ export function TradeFlow() {
                 </label>
               )}
 
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2" data-tutorial="qty">
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="text-neutral-500">수량</span>
                   <input
@@ -634,7 +693,7 @@ export function TradeFlow() {
                 </span>
               </div>
 
-              <fieldset className="flex flex-col gap-1 text-sm">
+              <fieldset className="flex flex-col gap-1 text-sm" data-tutorial="reason">
                 <legend className="mb-1.5 font-medium">
                   이 종목을 사려는 근거는 무엇인가요?
                 </legend>
@@ -670,6 +729,7 @@ export function TradeFlow() {
               <button
                 onClick={handleOrderClick}
                 disabled={!canSubmit}
+                data-tutorial="submit"
                 className="w-full rounded-xl bg-red-600 py-3 font-bold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-neutral-400"
               >
                 주문하기
