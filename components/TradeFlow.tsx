@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { BUY_REASON_TYPES, SELL_REASON_TYPES } from "@/lib/rationale";
 import { isValidTickPrice, priceTickSize } from "@/lib/market";
 import { AiExplain } from "@/components/AiExplain";
+import { DisclosureNews } from "@/components/DisclosureNews";
 import { DividendInfo } from "@/components/DividendInfo";
 import { FinancialRatios } from "@/components/FinancialRatios";
 import { PopularStocks } from "@/components/PopularStocks";
@@ -141,8 +142,8 @@ export function TradeFlow() {
     (step: TutorialStep) => QUOTE_GATED_TUTORIAL_STEP_IDS.has(step.id) && !quote,
     [quote],
   );
-  // 차트·호가 / 종목정보 — 주문 폼은 오른쪽에 고정이라 탭과 무관하게 항상 보입니다.
-  const [infoTab, setInfoTab] = useState<"chart" | "info">("chart");
+  // 차트·호가 / 종목정보 / 공시뉴스 — 주문 폼은 오른쪽에 고정이라 탭과 무관하게 항상 보입니다.
+  const [infoTab, setInfoTab] = useState<"chart" | "info" | "news">("chart");
 
   // 주문 폼
   const [side, setSide] = useState<"buy" | "sell">("buy");
@@ -539,6 +540,7 @@ export function TradeFlow() {
                     [
                       { value: "chart", label: "차트·호가" },
                       { value: "info", label: "종목정보" },
+                      { value: "news", label: "공시뉴스" },
                     ] as const
                   ).map((t) => (
                     <button
@@ -611,6 +613,8 @@ export function TradeFlow() {
                     </div>
                   </>
                 )}
+
+                {infoTab === "news" && <DisclosureNews stockCode={selected.stock_code} />}
               </>
             )}
           </div>
