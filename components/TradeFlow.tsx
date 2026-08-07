@@ -88,6 +88,8 @@ export function TradeFlow() {
   const [selected, setSelected] = useState<StockOption | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState(false);
+  // 차트·호가 / 종목정보 — 주문 폼은 오른쪽에 고정이라 탭과 무관하게 항상 보입니다.
+  const [infoTab, setInfoTab] = useState<"chart" | "info">("chart");
 
   // 주문 폼
   const [qty, setQty] = useState("");
@@ -198,6 +200,7 @@ export function TradeFlow() {
     setCandidates(null);
     setNotFound(false);
     setSelected(stock);
+    setInfoTab("chart");
     setQty("");
     setReasonType("");
     setReasonMemo("");
@@ -406,52 +409,85 @@ export function TradeFlow() {
                   </div>
                 </div>
 
-                <PriceChart stockCode={selected.stock_code} />
-
-                <div className="flex flex-col gap-3">
-                  <RangeBar
-                    label="오늘 범위"
-                    low={quote.low}
-                    high={quote.high}
-                    current={quote.price}
-                  />
-                  {quote.week52Low !== null && quote.week52High !== null && (
-                    <RangeBar
-                      label="52주 범위"
-                      low={quote.week52Low}
-                      high={quote.week52High}
-                      current={quote.price}
-                    />
-                  )}
+                {/* 토스증권처럼 차트·호가/종목정보를 탭으로 나누되, 주문 폼은
+                    오른쪽 칼럼에 그대로 둬서 탭을 옮겨도 계속 주문할 수 있게 합니다. */}
+                <div className="flex gap-1 border-b border-neutral-200">
+                  {(
+                    [
+                      { value: "chart", label: "차트·호가" },
+                      { value: "info", label: "종목정보" },
+                    ] as const
+                  ).map((t) => (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => setInfoTab(t.value)}
+                      aria-pressed={infoTab === t.value}
+                      className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition ${
+                        infoTab === t.value
+                          ? "border-neutral-900 text-neutral-900"
+                          : "border-transparent text-neutral-400 hover:text-neutral-700"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
                 </div>
 
-                {/* 🔴 AI 해석이 언급하는 값은 표에도 있어야 합니다. 한쪽에만 있으면
-                    사용자가 "AI가 말한 BPS가 어디 있지" 하고 화면을 뒤지게 됩니다.
-                    고가·저가는 위의 `오늘 범위` 막대가 대신하므로 여기서 뺐습니다. */}
-                <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-neutral-50 p-4 text-sm sm:grid-cols-4">
-                  <Metric label="시가" value={won(quote.open)} />
-                  <Metric
-                    label="거래량"
-                    value={`${quote.volume.toLocaleString("ko-KR")}주`}
-                  />
-                  <Metric label="업종" value={quote.sector} />
-                  <Metric label="PER" value={ratioLabel(quote.per)} />
-                  <Metric label="PBR" value={ratioLabel(quote.pbr)} />
-                  <Metric label="EPS" value={quote.eps === null ? "—" : won(quote.eps)} />
-                  <Metric label="BPS" value={quote.bps === null ? "—" : won(quote.bps)} />
-                </div>
+                {infoTab === "chart" && (
+                  <>
+                    <PriceChart stockCode={selected.stock_code} />
 
-                <AiExplain target="quote" stockCode={selected.stock_code} />
+                    <div className="flex flex-col gap-3">
+                      <RangeBar
+                        label="오늘 범위"
+                        low={quote.low}
+                        high={quote.high}
+                        current={quote.price}
+                      />
+                      {quote.week52Low !== null && quote.week52High !== null && (
+                        <RangeBar
+                          label="52주 범위"
+                          low={quote.week52Low}
+                          high={quote.week52High}
+                          current={quote.price}
+                        />
+                      )}
+                    </div>
 
-                <div>
-                  <h3 className="mb-2 text-sm font-bold">재무</h3>
-                  <FinancialRatios stockCode={selected.stock_code} />
-                </div>
+                    {/* 🔴 AI 해석이 언급하는 값은 표에도 있어야 합니다. 한쪽에만 있으면
+                        사용자가 "AI가 말한 BPS가 어디 있지" 하고 화면을 뒤지게 됩니다.
+                        고가·저가는 위의 `오늘 범위` 막대가 대신하므로 여기서 뺐습니다. */}
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-3 rounded-xl bg-neutral-50 p-4 text-sm sm:grid-cols-4">
+                      <Metric label="시가" value={won(quote.open)} />
+                      <Metric
+                        label="거래량"
+                        value={`${quote.volume.toLocaleString("ko-KR")}주`}
+                      />
+                      <Metric label="업종" value={quote.sector} />
+                      <Metric label="PER" value={ratioLabel(quote.per)} />
+                      <Metric label="PBR" value={ratioLabel(quote.pbr)} />
+                      <Metric label="EPS" value={quote.eps === null ? "—" : won(quote.eps)} />
+                      <Metric label="BPS" value={quote.bps === null ? "—" : won(quote.bps)} />
+                    </div>
 
-                <div>
-                  <h3 className="mb-2 text-sm font-bold">배당 정보</h3>
-                  <DividendInfo stockCode={selected.stock_code} currentPrice={quote.price} />
-                </div>
+                    <AiExplain target="quote" stockCode={selected.stock_code} />
+                  </>
+                )}
+
+                {infoTab === "info" && (
+                  <>
+                    <div>
+                      <h3 className="mb-2 text-sm font-bold">재무</h3>
+                      <FinancialRatios stockCode={selected.stock_code} />
+                    </div>
+
+                    <div>
+                      <h3 className="mb-2 text-sm font-bold">배당 정보</h3>
+                      <DividendInfo stockCode={selected.stock_code} currentPrice={quote.price} />
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>
