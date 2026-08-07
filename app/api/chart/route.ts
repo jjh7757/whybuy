@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { getCloses, isChartRange, type ChartRange } from "@/lib/kis";
 
 export const dynamic = "force-dynamic";
+// 🔴 "일" 구간은 장 시작(09:00)부터 지금까지 분봉을 최대 14페이지 이어붙이는데,
+// KIS 초당 1건 제한 때문에 오후로 갈수록 기본 함수 제한(10초)을 넘긴다. 여기서
+// 늘려주지 않으면 Vercel이 중간에 끊어서 최근 1~2시간 분량만 남는다. 값은
+// lib/kis.ts의 INTRADAY_DEADLINE_MS보다 커야 한다(응답 직렬화 등 여유분).
+export const maxDuration = 45;
 
 type Point = { label: string; close: number };
 

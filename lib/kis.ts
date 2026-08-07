@@ -660,10 +660,12 @@ function nowKstHms(): string {
 // 30분 페이지를 몇 번 이어붙여야 하루(09:00~15:30, 390분)를 채우는지의 상한입니다.
 // 390 ÷ 30 = 13, 여유를 하나 둡니다.
 const INTRADAY_MAX_PAGES = 14;
-const INTRADAY_GAP_MS = 400;
 const INTRADAY_RETRY_BACKOFF_MS = 900;
-// Vercel 함수 제한(10초) 전에 지금까지 모은 것만 반환합니다.
-const INTRADAY_DEADLINE_MS = 7000;
+// 🔴 예전엔 여기서 7초에 끊었는데, 앱키당 초당 1건(EGW00201) 제한 때문에 페이지당
+// 최소 1.1초(KIS_MIN_INTERVAL_MS)가 걸려 오후로 갈수록(페이지가 늘수록) 장 시작까지
+// 못 채우고 최근 1~2시간만 남는 문제가 있었다. route.ts의 maxDuration(45초)에 맞춰
+// 늘렸다 — 14페이지를 다 채워도 여유가 남는다.
+const INTRADAY_DEADLINE_MS = 40_000;
 
 async function fetchMinutePage(stockCode: string, hour: string) {
   const data = (await callKis(
@@ -745,7 +747,8 @@ export async function getIntradayCloses(stockCode: string): Promise<ChartPoint[]
     const totalMin = Number(oldest.slice(0, 2)) * 60 + Number(oldest.slice(2, 4)) - 1;
     anchor = `${String(Math.floor(totalMin / 60)).padStart(2, "0")}${String(totalMin % 60).padStart(2, "0")}00`;
 
-    await sleep(INTRADAY_GAP_MS);
+    // 페이지 사이 간격은 reserveKisSlot()의 초당 1건 큐가 이미 보장하므로 여기서 또
+    // 재우지 않습니다 — 이중으로 쉬면 그만큼 예산(INTRADAY_DEADLINE_MS)만 줄어듭니다.
   }
 
   return collected

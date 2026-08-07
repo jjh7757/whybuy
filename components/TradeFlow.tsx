@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { REASON_TYPES } from "@/lib/rationale";
@@ -104,6 +104,10 @@ const TUTORIAL_STEPS: TutorialStep[] = [
   },
 ];
 
+// quote가 로딩되기 전엔 이 스텝들의 타겟이 DOM에 없습니다 — 시세 로딩 지연/실패를
+// "화면 구조가 바뀜"으로 오인해 튜토리얼이 자동 스킵하지 않도록 구분합니다.
+const QUOTE_GATED_TUTORIAL_STEP_IDS = new Set(["quote", "qty", "reason", "submit"]);
+
 type Draft = {
   stockCode: string;
   stockName: string;
@@ -133,6 +137,10 @@ export function TradeFlow() {
   const [selected, setSelected] = useState<StockOption | null>(null);
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteError, setQuoteError] = useState(false);
+  const isTutorialStepBlocked = useCallback(
+    (step: TutorialStep) => QUOTE_GATED_TUTORIAL_STEP_IDS.has(step.id) && !quote,
+    [quote],
+  );
   // 차트·호가 / 종목정보 — 주문 폼은 오른쪽에 고정이라 탭과 무관하게 항상 보입니다.
   const [infoTab, setInfoTab] = useState<"chart" | "info">("chart");
 
@@ -359,7 +367,7 @@ export function TradeFlow() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Tutorial tutorial={tutorial} />
+      <Tutorial tutorial={tutorial} isBlocked={isTutorialStepBlocked} />
 
       <div className="flex items-center justify-between gap-2">
         <form onSubmit={search} data-tutorial="search" className="flex flex-1 gap-2">

@@ -87,10 +87,17 @@ type UseTutorialReturn = ReturnType<typeof useTutorial>;
 const TOOLTIP_WIDTH = 280;
 const TOOLTIP_HEIGHT_ESTIMATE = 160;
 const SPOTLIGHT_PADDING = 6;
-const MAX_FIND_ATTEMPTS = 300; // 약 5초(프레임 기준)
+const MAX_FIND_MS = 5000; // 프레임이 아니라 실제 경과 시간 기준(고주사율 모니터에서 너무 일찍 끝나는 것을 방지)
 
 /** 타겟 엘리먼트 주변을 어둡게 감싸고 말풍선으로 설명을 붙입니다. */
-export function Tutorial({ tutorial }: { tutorial: UseTutorialReturn }) {
+export function Tutorial({
+  tutorial,
+  isBlocked,
+}: {
+  tutorial: UseTutorialReturn;
+  /** true를 반환하면 이 스텝은 아직 자동 스킵 대상이 아닙니다(예: 데이터 로딩 중) — 타임아웃 없이 계속 기다립니다. */
+  isBlocked?: (step: TutorialStep) => boolean;
+}) {
   const { active, currentStep, stepIndex, totalSteps, next, dismiss } = tutorial;
   const [rect, setRect] = useState<DOMRect | null>(null);
 
@@ -100,8 +107,8 @@ export function Tutorial({ tutorial }: { tutorial: UseTutorialReturn }) {
       return;
     }
     let raf = 0;
-    let attempts = 0;
     let cancelled = false;
+    let waitStartedAt: number | null = null;
 
     function tryFind() {
       if (cancelled) return;
@@ -117,8 +124,13 @@ export function Tutorial({ tutorial }: { tutorial: UseTutorialReturn }) {
         setRect(el.getBoundingClientRect());
         return;
       }
-      attempts += 1;
-      if (attempts > MAX_FIND_ATTEMPTS) {
+      if (isBlocked?.(currentStep!)) {
+        // 데이터 로딩/에러 등 정당한 이유로 아직 없는 경우엔 타임아웃 시계를 시작하지 않습니다.
+        raf = requestAnimationFrame(tryFind);
+        return;
+      }
+      if (waitStartedAt === null) waitStartedAt = performance.now();
+      if (performance.now() - waitStartedAt > MAX_FIND_MS) {
         // 타겟을 끝내 못 찾으면(예: 화면 구조가 바뀜) 멈추지 말고 넘어갑니다.
         next();
         return;
@@ -131,7 +143,7 @@ export function Tutorial({ tutorial }: { tutorial: UseTutorialReturn }) {
       cancelled = true;
       cancelAnimationFrame(raf);
     };
-  }, [active, currentStep, next]);
+  }, [active, currentStep, next, isBlocked]);
 
   useEffect(() => {
     if (!rect || !currentStep) return;
