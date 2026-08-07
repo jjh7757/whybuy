@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AiExplain } from "@/components/AiExplain";
 
 type Holding = {
@@ -16,6 +16,16 @@ type Holding = {
   profitLossRate: number | null;
 };
 
+type PendingOrder = {
+  id: number;
+  stockCode: string;
+  stockName: string;
+  qty: number;
+  filledQty: number;
+  limitPrice: number;
+  createdAt: string;
+};
+
 type Account =
   | { loggedIn: false }
   | {
@@ -24,6 +34,7 @@ type Account =
       spent: number;
       remaining: number;
       holdings: Holding[];
+      pendingOrders: PendingOrder[];
       totalEvaluation: number | null;
       totalProfitLoss: number | null;
       partialPrices: boolean;
@@ -35,17 +46,60 @@ export function AccountCard() {
   const [account, setAccount] = useState<Account | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [actingId, setActingId] = useState<number | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  const loadAccount = useCallback(async () => {
+    const res = await fetch("/api/account");
+    if (!res.ok) throw new Error((await res.json()).error);
+    setAccount(await res.json());
+  }, []);
 
   useEffect(() => {
-    fetch("/api/account")
-      .then(async (res) => {
-        if (!res.ok) throw new Error((await res.json()).error);
-        return res.json();
-      })
-      .then(setAccount)
+    loadAccount()
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [loadAccount]);
+
+  // 자동 폴링은 하지 않습니다(기획서 Won't Have인 "실시간 알림·스케줄러"와 같은
+  // 이유) — 사용자가 버튼을 눌렀을 때만 KIS에 체결 여부를 물어봅니다.
+  async function checkFill(id: number) {
+    setActingId(id);
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/order/${id}/check-fill`, { method: "POST" });
+      const data = await res.json();
+      if (!data.ok) {
+        setActionMessage(data.message ?? "체결 확인에 실패했습니다.");
+      } else if (data.status === "filled") {
+        setActionMessage("체결되었습니다.");
+      } else {
+        setActionMessage(
+          `아직 대기중입니다. (체결 ${data.filledQty}주 · 잔여 ${data.remainingQty}주)`,
+        );
+      }
+      await loadAccount();
+    } catch {
+      setActionMessage("체결 확인 요청을 보내지 못했습니다.");
+    } finally {
+      setActingId(null);
+    }
+  }
+
+  async function cancelPending(id: number) {
+    setActingId(id);
+    setActionMessage(null);
+    try {
+      const res = await fetch(`/api/order/${id}/cancel`, { method: "POST" });
+      const data = await res.json();
+      setActionMessage(data.ok ? "주문을 취소했습니다." : data.message ?? "취소에 실패했습니다.");
+      await loadAccount();
+    } catch {
+      setActionMessage("취소 요청을 보내지 못했습니다.");
+    } finally {
+      setActingId(null);
+    }
+  }
 
   if (loading) {
     return <div className="h-24 animate-pulse rounded-lg bg-neutral-100" />;
@@ -89,6 +143,58 @@ export function AccountCard() {
           />
         </div>
       </div>
+
+      {actionMessage && (
+        <p className="rounded-lg bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+          {actionMessage}
+        </p>
+      )}
+
+      {account.pendingOrders.length > 0 && (
+        <div>
+          <h3 className="mb-2 text-sm font-medium text-neutral-500">
+            대기중인 지정가 주문
+          </h3>
+          <ul className="flex flex-col gap-2">
+            {account.pendingOrders.map((o) => {
+              const remainingQty = o.qty - o.filledQty;
+              const acting = actingId === o.id;
+              return (
+                <li
+                  key={o.id}
+                  className="flex flex-col gap-2 rounded-lg border border-neutral-200 p-3 text-sm sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <span>
+                    {o.stockName} · 잔여 {remainingQty}주
+                    <span className="ml-1 text-neutral-400">
+                      (지정가 {won(o.limitPrice)}
+                      {o.filledQty > 0 ? ` · ${o.filledQty}주 부분체결` : ""})
+                    </span>
+                  </span>
+                  <span className="flex gap-1.5">
+                    <button
+                      type="button"
+                      disabled={acting}
+                      onClick={() => checkFill(o.id)}
+                      className="rounded-lg border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 disabled:opacity-50"
+                    >
+                      체결 확인
+                    </button>
+                    <button
+                      type="button"
+                      disabled={acting}
+                      onClick={() => cancelPending(o.id)}
+                      className="rounded-lg border border-neutral-200 px-2.5 py-1 text-xs font-medium text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                    >
+                      취소
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {account.holdings.length === 0 ? (
         <div className="rounded-xl border border-dashed border-neutral-300 p-8 text-center">
@@ -136,7 +242,7 @@ export function AccountCard() {
                 <span>
                   {h.stockName} · {h.qty}주
                   <span className="ml-1 text-neutral-400">
-                    (주문가 {won(h.avgOrderPrice)})
+                    (체결가 {won(h.avgOrderPrice)})
                   </span>
                 </span>
                 <span
@@ -165,8 +271,8 @@ export function AccountCard() {
       )}
 
       <p className="text-xs text-neutral-400">
-        수량과 주문가는 이 서비스로 넣은 주문 기준입니다. 시장가 주문이라 실제
-        체결가와 다를 수 있습니다.
+        수량과 체결가는 이 서비스로 넣은 주문 기준입니다. 시장가 주문은 접수
+        시점의 시세를 체결가로 간주합니다.
       </p>
 
       <AiExplain target="account" />

@@ -73,6 +73,7 @@ export async function GET() {
     spent: portfolio.spent,
     remaining: portfolio.remaining,
     holdings,
+    pendingOrders: portfolio.pendingOrders,
     totalEvaluation,
     totalProfitLoss,
     // 일부 종목의 시세를 못 받았는지 화면이 알 수 있게 합니다.

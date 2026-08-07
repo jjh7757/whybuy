@@ -67,10 +67,12 @@ type Draft = {
   qty: string;
   reasonType: string;
   reasonMemo: string;
+  orderType: "market" | "limit";
+  limitPrice: string;
 };
 
 type OrderResult =
-  | { kind: "success"; orderNo: string }
+  | { kind: "success"; orderNo: string; status: "filled" | "submitted" }
   | { kind: "failed"; message: string };
 
 export function TradeFlow() {
@@ -95,6 +97,8 @@ export function TradeFlow() {
   const [qty, setQty] = useState("");
   const [reasonType, setReasonType] = useState("");
   const [reasonMemo, setReasonMemo] = useState("");
+  const [orderType, setOrderType] = useState<"market" | "limit">("market");
+  const [limitPrice, setLimitPrice] = useState("");
 
   // 확인 모달
   const [confirming, setConfirming] = useState(false);
@@ -130,6 +134,8 @@ export function TradeFlow() {
       setQty(draft.qty);
       setReasonType(draft.reasonType);
       setReasonMemo(draft.reasonMemo);
+      setOrderType(draft.orderType ?? "market");
+      setLimitPrice(draft.limitPrice ?? "");
 
       fetchQuote(draft.stockCode);
       openConfirm();
@@ -204,6 +210,8 @@ export function TradeFlow() {
     setQty("");
     setReasonType("");
     setReasonMemo("");
+    setOrderType("market");
+    setLimitPrice("");
     setResult(null);
     fetchQuote(stock.stock_code);
     // 수량 퀵버튼이 남은 예산을 기준으로 계산하므로 미리 받아둡니다.
@@ -213,8 +221,14 @@ export function TradeFlow() {
 
   const qtyNum = Number(qty);
   const validQty = qty.trim() !== "" && Number.isInteger(qtyNum) && qtyNum > 0;
-  const expectedAmount = validQty && quote ? qtyNum * quote.price : 0;
-  const canSubmit = validQty && reasonType !== "" && quote !== null;
+  const limitPriceNum = Number(limitPrice);
+  const validLimitPrice =
+    orderType === "market" ||
+    (limitPrice.trim() !== "" && Number.isInteger(limitPriceNum) && limitPriceNum > 0);
+  // 지정가는 사용자가 지정한 가격, 시장가는 현재가로 예상 금액을 계산합니다.
+  const effectivePrice = orderType === "limit" ? limitPriceNum : (quote?.price ?? 0);
+  const expectedAmount = validQty && validLimitPrice && quote ? qtyNum * effectivePrice : 0;
+  const canSubmit = validQty && validLimitPrice && reasonType !== "" && quote !== null;
 
   async function fetchRemaining() {
     try {
@@ -246,6 +260,8 @@ export function TradeFlow() {
         qty,
         reasonType,
         reasonMemo,
+        orderType,
+        limitPrice,
       };
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
       supabase.auth.signInWithOAuth({
@@ -270,15 +286,19 @@ export function TradeFlow() {
           qty: qtyNum,
           reasonType,
           reasonMemo,
+          orderType,
+          limitPrice: orderType === "limit" ? limitPriceNum : undefined,
         }),
       });
       const data = await res.json();
       setConfirming(false);
       if (data.ok) {
-        setResult({ kind: "success", orderNo: data.orderNo });
+        setResult({ kind: "success", orderNo: data.orderNo, status: data.status });
         setQty("");
         setReasonType("");
         setReasonMemo("");
+        setOrderType("market");
+        setLimitPrice("");
       } else {
         setResult({ kind: "failed", message: data.message ?? "주문에 실패했습니다." });
       }
@@ -504,6 +524,56 @@ export function TradeFlow() {
                 )}
               </div>
 
+              <div className="flex gap-1.5">
+                {(
+                  [
+                    { value: "market", label: "시장가" },
+                    { value: "limit", label: "지정가" },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.value}
+                    type="button"
+                    onClick={() => {
+                      setOrderType(t.value);
+                      // 처음 지정가로 바꿀 때는 현재가를 기본값으로 채워둡니다.
+                      if (t.value === "limit" && limitPrice.trim() === "") {
+                        setLimitPrice(String(quote.price));
+                      }
+                    }}
+                    aria-pressed={orderType === t.value}
+                    className={`flex-1 rounded-lg py-1.5 text-sm font-medium transition ${
+                      orderType === t.value
+                        ? "bg-neutral-900 text-white"
+                        : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {orderType === "limit" && (
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-neutral-500">주문 가격</span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={limitPrice}
+                    onChange={(e) => setLimitPrice(e.target.value)}
+                    placeholder={String(quote.price)}
+                    className="tnum w-full rounded-xl border border-neutral-200 px-3 py-2 text-right text-lg font-medium outline-none transition focus:border-neutral-900"
+                  />
+                  {limitPrice.trim() !== "" && !validLimitPrice && (
+                    <span className="text-xs text-red-600">1원 이상의 정수로 입력해주세요.</span>
+                  )}
+                  <span className="text-xs text-neutral-400">
+                    이 가격이 될 때까지 체결되지 않을 수 있습니다. 대기중인 주문은 내 계좌에서
+                    확인·취소할 수 있습니다.
+                  </span>
+                </label>
+              )}
+
               <div className="flex flex-col gap-2">
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="text-neutral-500">수량</span>
@@ -521,7 +591,10 @@ export function TradeFlow() {
                 {remaining !== null && (
                   <div className="grid grid-cols-4 gap-1.5">
                     {[10, 25, 50, 100].map((pct) => {
-                      const affordable = Math.floor((remaining * (pct / 100)) / quote.price);
+                      const affordable =
+                        effectivePrice > 0
+                          ? Math.floor((remaining * (pct / 100)) / effectivePrice)
+                          : 0;
                       return (
                         <button
                           key={pct}
@@ -597,7 +670,9 @@ export function TradeFlow() {
                 <p className="-mt-2 text-center text-xs text-neutral-400">
                   {!validQty
                     ? "수량을 입력해주세요."
-                    : "근거를 선택해야 주문할 수 있습니다."}
+                    : !validLimitPrice
+                      ? "주문 가격을 입력해주세요."
+                      : "근거를 선택해야 주문할 수 있습니다."}
                 </p>
               )}
             </div>
@@ -607,7 +682,9 @@ export function TradeFlow() {
 
       {result?.kind === "success" && (
         <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-800">
-          주문이 접수되었습니다. (주문번호 {result.orderNo}){" "}
+          {result.status === "filled"
+            ? `주문이 체결되었습니다. (주문번호 ${result.orderNo})`
+            : `지정가 주문이 접수되어 대기중입니다. (주문번호 ${result.orderNo}) 체결 확인·취소는 내 계좌에서 할 수 있습니다.`}{" "}
           <Link href="/journal" className="underline">
             회고 화면에서 보기
           </Link>
@@ -623,6 +700,8 @@ export function TradeFlow() {
         <ConfirmModal
           stockName={selected.stock_name}
           qty={qtyNum}
+          orderType={orderType}
+          price={effectivePrice}
           expectedAmount={expectedAmount}
           reasonLabel={REASON_TYPES.find((r) => r.value === reasonType)?.label ?? ""}
           remaining={remaining}
@@ -638,6 +717,8 @@ export function TradeFlow() {
 function ConfirmModal({
   stockName,
   qty,
+  orderType,
+  price,
   expectedAmount,
   reasonLabel,
   remaining,
@@ -647,6 +728,8 @@ function ConfirmModal({
 }: {
   stockName: string;
   qty: number;
+  orderType: "market" | "limit";
+  price: number;
   expectedAmount: number;
   reasonLabel: string;
   remaining: number | null;
@@ -655,12 +738,19 @@ function ConfirmModal({
   onConfirm: () => void;
 }) {
   const after = remaining === null ? null : remaining - expectedAmount;
+  const priceLabel = orderType === "market" ? "시장가" : `지정가 ${won(price)}`;
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-lg">
         <h3 className="font-medium">주문을 확인해주세요</h3>
         <p className="mt-3 text-sm leading-relaxed">
-          {stockName} {qty}주 · 예상 {won(expectedAmount)} · 근거: {reasonLabel}
+          {stockName} {qty}주 · {priceLabel} · 예상 {won(expectedAmount)} · 근거: {reasonLabel}
+          {orderType === "limit" && (
+            <>
+              <br />
+              지정한 가격이 될 때까지 체결되지 않을 수 있습니다.
+            </>
+          )}
           {after !== null && (
             <>
               <br />이 주문 후 남는 예산: {won(after)}

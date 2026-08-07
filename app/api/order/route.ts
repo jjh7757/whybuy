@@ -5,10 +5,10 @@ import { getQuote, getBuyableCash, placeBuyOrder } from "@/lib/kis";
 import { isMarketOpen } from "@/lib/market";
 import { REASON_TYPES } from "@/lib/rationale";
 import { logEvent } from "@/lib/events";
+import { DEFAULT_ALLOCATED_AMOUNT, getMyPortfolio } from "@/lib/portfolio";
 
 export const dynamic = "force-dynamic";
 
-const DEFAULT_ALLOCATED_AMOUNT = 5_000_000;
 const REASON_VALUES = new Set<string>(REASON_TYPES.map((r) => r.value));
 
 type Body = {
@@ -16,6 +16,8 @@ type Body = {
   qty?: number;
   reasonType?: string;
   reasonMemo?: string;
+  orderType?: "market" | "limit";
+  limitPrice?: number;
 };
 
 /**
@@ -41,6 +43,8 @@ export async function POST(request: Request) {
   const qty = Number(body.qty);
   const reasonType = body.reasonType;
   const reasonMemo = body.reasonMemo?.trim() || null;
+  const orderType = body.orderType === "limit" ? "limit" : "market";
+  const limitPrice = orderType === "limit" ? Number(body.limitPrice) : null;
 
   // 예외 2.9는 클라이언트가 버튼을 비활성화해 막지만, 서버도 독립적으로 검증합니다.
   if (
@@ -49,7 +53,8 @@ export async function POST(request: Request) {
     !Number.isInteger(qty) ||
     qty <= 0 ||
     !reasonType ||
-    !REASON_VALUES.has(reasonType)
+    !REASON_VALUES.has(reasonType) ||
+    (orderType === "limit" && (!Number.isInteger(limitPrice) || (limitPrice as number) <= 0))
   ) {
     return NextResponse.json(
       { ok: false, code: "invalid_input", message: "입력값이 올바르지 않습니다." },
@@ -115,15 +120,21 @@ export async function POST(request: Request) {
     });
   }
 
+  // 지정가는 사용자가 이미 가격을 정했으니 시세를 다시 물어볼 필요가 없습니다
+  // (KIS 레이트리밋 예산도 아낍니다). 시장가만 현재가를 조회합니다.
   let price: number;
-  try {
-    price = (await getQuote(stockCode)).price;
-  } catch (err) {
-    console.error("[/api/order] 시세 조회 실패", err);
-    return NextResponse.json(
-      { ok: false, code: "quote_failed", message: "시세를 확인하지 못해 주문할 수 없습니다." },
-      { status: 502 },
-    );
+  if (orderType === "limit") {
+    price = limitPrice as number;
+  } else {
+    try {
+      price = (await getQuote(stockCode)).price;
+    } catch (err) {
+      console.error("[/api/order] 시세 조회 실패", err);
+      return NextResponse.json(
+        { ok: false, code: "quote_failed", message: "시세를 확인하지 못해 주문할 수 없습니다." },
+        { status: 502 },
+      );
+    }
   }
   const expectedAmount = price * qty;
 
@@ -136,20 +147,10 @@ export async function POST(request: Request) {
       { user_id: user.id, allocated_amount: DEFAULT_ALLOCATED_AMOUNT },
       { onConflict: "user_id", ignoreDuplicates: true },
     );
-  const { data: wallet } = await admin
-    .from("user_wallets")
-    .select("allocated_amount")
-    .eq("user_id", user.id)
-    .single();
-  const allocated = wallet?.allocated_amount ?? DEFAULT_ALLOCATED_AMOUNT;
 
-  const { data: submittedOrders } = await supabase
-    .from("orders")
-    .select("expected_amount")
-    .eq("user_id", user.id)
-    .eq("status", "submitted");
-  const spent = (submittedOrders ?? []).reduce((s, o) => s + o.expected_amount, 0);
-  const remaining = allocated - spent;
+  // 대기중인 지정가 주문도 예산을 묶어두므로, 단순 합산이 아니라 getMyPortfolio의
+  // 규칙(lib/portfolio.ts)을 그대로 재사용해 일관성을 맞춥니다.
+  const { remaining } = await getMyPortfolio(supabase, user.id);
 
   // 예외 2.11 — 가상 예산 초과 (실제 예수금과 무관한 사용자별 1차 방어선)
   if (expectedAmount > remaining) {
@@ -203,6 +204,8 @@ export async function POST(request: Request) {
       expected_price: price,
       expected_amount: expectedAmount,
       status: "requested",
+      order_type: orderType,
+      limit_price: limitPrice,
     })
     .select("id")
     .single();
@@ -226,11 +229,27 @@ export async function POST(request: Request) {
   });
 
   try {
-    const { orderNo } = await placeBuyOrder(stockCode, qty);
+    const { orderNo, krxFwdgOrdOrgno } = await placeBuyOrder(
+      stockCode,
+      qty,
+      orderType === "limit" ? (limitPrice as number) : undefined,
+    );
 
+    // 시장가는 접수 즉시 체결로 취급합니다(지금까지 해온 방식 그대로, 이름만
+    // status='filled'로 바뀜). 지정가는 실제로 체결됐는지 KIS에 다시 물어봐야
+    // 알 수 있으니 대기중(submitted)으로 남겨두고, 사용자가 "체결 확인"을 누르면
+    // /api/order/[id]/check-fill이 채웁니다.
+    const isMarket = orderType === "market";
     await supabase
       .from("orders")
-      .update({ status: "submitted", order_no: orderNo, updated_at: new Date().toISOString() })
+      .update({
+        status: isMarket ? "filled" : "submitted",
+        order_no: orderNo,
+        krx_fwdg_ord_orgno: krxFwdgOrdOrgno,
+        filled_qty: isMarket ? qty : 0,
+        filled_price: isMarket ? price : null,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", orderRow.id);
 
     await logEvent("order_submitted", "domain", {
@@ -238,9 +257,15 @@ export async function POST(request: Request) {
       qty,
       expected_price: price,
       order_no: orderNo,
+      order_type: orderType,
     });
 
-    return NextResponse.json({ ok: true, orderId: orderRow.id, orderNo });
+    return NextResponse.json({
+      ok: true,
+      orderId: orderRow.id,
+      orderNo,
+      status: isMarket ? "filled" : "submitted",
+    });
   } catch (err) {
     // 예외 2.8 — KIS가 주문을 거부함
     const reason = err instanceof Error ? err.message : String(err);

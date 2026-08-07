@@ -195,29 +195,34 @@ export async function getBuyableCash(stockCode: string): Promise<number> {
 }
 
 type OrderResponse = KisResultEnvelope & {
-  output?: { ODNO: string; ORD_TMD: string };
+  output?: { ODNO: string; ORD_TMD: string; KRX_FWDG_ORD_ORGNO: string };
 };
 
 /**
- * 국내주식 시장가 매수주문을 넣습니다(모의투자, 예외 2.8용).
+ * 국내주식 매수주문을 넣습니다(모의투자, 예외 2.8용). `limitPrice`가 없으면
+ * 시장가, 있으면 그 가격의 지정가 주문입니다.
  *
  * 🔴 hashkey를 붙인 조합으로 실주문 성공을 검증했습니다(2026-08-06 15:16 KST,
  * 주문번호 0000041001). hashkey 없이도 되는지는 확인하지 않았으므로 그대로 둡니다.
  *
  * rt_cd !== "0"이면 throw합니다. HTTP 상태는 200이라 callKis의 !res.ok 분기로는
  * 걸러지지 않고, 반드시 이 함수가 rt_cd를 직접 검사해야 합니다.
+ *
+ * 🔴 응답의 `KRX_FWDG_ORD_ORGNO`(한국거래소전송주문조직번호)는 나중에 이 주문을
+ * 취소/정정할 때 원주문번호(ODNO)와 함께 반드시 있어야 하는 값이라 같이 반환합니다.
  */
 export async function placeBuyOrder(
   stockCode: string,
   qty: number,
-): Promise<{ orderNo: string; orderTime: string }> {
+  limitPrice?: number,
+): Promise<{ orderNo: string; orderTime: string; krxFwdgOrdOrgno: string }> {
   const body = {
     CANO: process.env.KIS_ACCOUNT_NO!,
     ACNT_PRDT_CD: process.env.KIS_ACCOUNT_PRODUCT_CODE!,
     PDNO: stockCode,
-    ORD_DVSN: "01", // 시장가
+    ORD_DVSN: limitPrice ? "00" : "01", // 00: 지정가, 01: 시장가
     ORD_QTY: String(qty),
-    ORD_UNPR: "0",
+    ORD_UNPR: limitPrice ? String(limitPrice) : "0",
   };
 
   await reserveKisSlot();
@@ -243,7 +248,11 @@ export async function placeBuyOrder(
     throw new Error(data.msg1?.trim() || `주문 실패 (${data.msg_cd})`);
   }
 
-  return { orderNo: data.output.ODNO, orderTime: data.output.ORD_TMD };
+  return {
+    orderNo: data.output.ODNO,
+    orderTime: data.output.ORD_TMD,
+    krxFwdgOrdOrgno: data.output.KRX_FWDG_ORD_ORGNO,
+  };
 }
 
 type QuoteResponse = {
@@ -385,6 +394,117 @@ export async function getDividends(stockCode: string): Promise<Dividend[]> {
     }))
     .filter((d) => d.perShare > 0 && d.recordDate)
     .sort((a, b) => (a.recordDate < b.recordDate ? 1 : -1));
+}
+
+type DailyCcldResponse = {
+  output1?: Array<{
+    odno: string; // 주문번호
+    ord_qty: string; // 주문수량
+    tot_ccld_qty: string; // 총체결수량
+    avg_prvs: string; // 평균체결가
+    rmn_qty: string; // 잔여수량
+    cncl_cfrm_qty: string; // 취소확정수량
+  }>;
+};
+
+export type OrderFillStatus = {
+  filledQty: number;
+  avgFillPrice: number;
+  remainingQty: number;
+  cancelledQty: number;
+};
+
+/**
+ * 특정 주문의 체결 현황을 조회합니다(주식일별주문체결조회, VTTC0081R).
+ *
+ * 🔴 실측으로 확정: 오늘 실주문(0000005301)으로 확인 — 필드명이 문서 추정과
+ * 정확히 일치했다(첫 시도에 성공). 자동 폴링은 하지 않고, 사용자가 "체결 확인"
+ * 버튼을 눌렀을 때만 부른다.
+ *
+ * 🔴 취소해도 원주문 행의 `cncl_yn`은 그대로 "N"이다 — 취소 여부는 `cncl_cfrm_qty`
+ * (취소확정수량)로 판단해야 한다. 취소는 `orgn_odno`로 원주문을 가리키는 별도의
+ * 취소 거래 행으로 따로 남는다(원주문 행과 다른 `odno`).
+ */
+export async function checkOrderFill(orderNo: string): Promise<OrderFillStatus | null> {
+  const today = kstDateString(new Date());
+  const data = (await callKis("/uapi/domestic-stock/v1/trading/inquire-daily-ccld", {
+    trId: "VTTC0081R",
+    query: {
+      CANO: process.env.KIS_ACCOUNT_NO!,
+      ACNT_PRDT_CD: process.env.KIS_ACCOUNT_PRODUCT_CODE!,
+      INQR_STRT_DT: today,
+      INQR_END_DT: today,
+      SLL_BUY_DVSN_CD: "00",
+      INQR_DVSN: "00",
+      PDNO: "",
+      CCLD_DVSN: "00",
+      ORD_GNO_BRNO: "",
+      ODNO: orderNo,
+      INQR_DVSN_3: "00",
+      INQR_DVSN_1: "",
+      CTX_AREA_FK100: "",
+      CTX_AREA_NK100: "",
+    },
+  })) as DailyCcldResponse;
+
+  const row = (data.output1 ?? []).find((r) => r.odno === orderNo);
+  if (!row) return null;
+
+  return {
+    filledQty: Number(row.tot_ccld_qty || 0),
+    avgFillPrice: Math.round(Number(row.avg_prvs || 0)),
+    remainingQty: Number(row.rmn_qty || 0),
+    cancelledQty: Number(row.cncl_cfrm_qty || 0),
+  };
+}
+
+/**
+ * 국내주식 주문을 취소합니다(정정취소, VTTC0803U). 잔량 전체를 취소합니다.
+ *
+ * 🔴 실측으로 확인: 취소해도 원주문 행의 `cncl_yn`은 그대로 "N"이다 — 취소는
+ * `orgn_odno`로 원주문을 가리키는 **별도의 취소 거래 행**으로 남고, 원주문 쪽은
+ * `cncl_cfrm_qty`(취소확정수량)·`rmn_qty`(잔여수량 0)로만 취소를 알 수 있다.
+ * hashkey가 필요해 `placeBuyOrder`와 같은 패턴을 그대로 쓴다.
+ */
+export async function cancelOrder(
+  orderNo: string,
+  krxFwdgOrdOrgno: string,
+  remainingQty: number,
+): Promise<void> {
+  const body = {
+    CANO: process.env.KIS_ACCOUNT_NO!,
+    ACNT_PRDT_CD: process.env.KIS_ACCOUNT_PRODUCT_CODE!,
+    KRX_FWDG_ORD_ORGNO: krxFwdgOrdOrgno,
+    ORGN_ODNO: orderNo,
+    ORD_DVSN: "00",
+    RVSE_CNCL_DVSN_CD: "02", // 취소
+    ORD_QTY: String(remainingQty),
+    ORD_UNPR: "0",
+    QTY_ALL_ORD_YN: "Y",
+  };
+
+  await reserveKisSlot();
+  const hashRes = await fetch(`${BASE_URL}/uapi/hashkey`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      appkey: APP_KEY,
+      appsecret: APP_SECRET,
+    },
+    body: JSON.stringify(body),
+  });
+  const hash = hashRes.ok ? ((await hashRes.json()) as { HASH?: string }).HASH : undefined;
+
+  const data = (await callKis("/uapi/domestic-stock/v1/trading/order-rvsecncl", {
+    trId: "VTTC0803U",
+    method: "POST",
+    body,
+    hashkey: hash,
+  })) as OrderResponse;
+
+  if (data.rt_cd !== "0") {
+    throw new Error(data.msg1?.trim() || `취소 실패 (${data.msg_cd})`);
+  }
 }
 
 type FinancialRatioResponse = {

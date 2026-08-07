@@ -68,6 +68,16 @@ export function JournalList({ rows }: { rows: JournalRow[] }) {
                     거부됨
                   </span>
                 )}
+                {row.status === "submitted" && (
+                  <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-amber-700">
+                    대기중
+                  </span>
+                )}
+                {row.status === "cancelled" && (
+                  <span className="ml-2 rounded bg-neutral-100 px-1.5 py-0.5 text-neutral-600">
+                    취소됨
+                  </span>
+                )}
               </span>
             </div>
 
