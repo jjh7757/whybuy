@@ -2,12 +2,12 @@ import "server-only";
 
 const API_KEY = process.env.DART_API_KEY!;
 
-export type Disclosure = { title: string; date: string };
+export type Disclosure = { title: string; date: string; url: string };
 
 type DartListResponse = {
   status: string;
   message: string;
-  list?: Array<{ report_nm: string; rcept_dt: string }>;
+  list?: Array<{ report_nm: string; rcept_dt: string; rcept_no: string }>;
 };
 
 const formatDate = (yyyymmdd: string) =>
@@ -48,6 +48,7 @@ export async function getRecentDisclosures(corpCode: string): Promise<Disclosure
     return data.list.map((d) => ({
       title: d.report_nm.trim(),
       date: formatDate(d.rcept_dt),
+      url: `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${d.rcept_no}`,
     }));
   } catch {
     return [];

@@ -2,19 +2,26 @@
 
 import { useEffect, useState } from "react";
 
-type Disclosure = { title: string; date: string };
-type NewsItem = { title: string; date: string };
+type Disclosure = { title: string; date: string; url: string };
+type NewsItem = { title: string; date: string; url: string };
 
-function Item({ tag, title, date }: { tag: string; title: string; date: string }) {
+function Item({ tag, title, date, url }: { tag: string; title: string; date: string; url: string }) {
   return (
-    <li className="flex items-start justify-between gap-3 py-2">
-      <div className="flex min-w-0 items-baseline gap-2">
-        <span className="shrink-0 rounded bg-neutral-200 px-1.5 py-0.5 text-xs text-neutral-500">
-          {tag}
-        </span>
-        <span className="truncate text-sm">{title}</span>
-      </div>
-      <span className="tnum shrink-0 text-xs text-neutral-400">{date}</span>
+    <li>
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-start justify-between gap-3 py-2 transition hover:bg-neutral-100"
+      >
+        <div className="flex min-w-0 items-baseline gap-2">
+          <span className="shrink-0 rounded bg-neutral-200 px-1.5 py-0.5 text-xs text-neutral-500">
+            {tag}
+          </span>
+          <span className="truncate text-sm underline-offset-2 hover:underline">{title}</span>
+        </div>
+        <span className="tnum shrink-0 text-xs text-neutral-400">{date}</span>
+      </a>
     </li>
   );
 }
@@ -63,10 +70,10 @@ export function DisclosureNews({ stockCode }: { stockCode: string }) {
   return (
     <ul className="flex flex-col divide-y divide-neutral-200 rounded-xl bg-neutral-50 px-4">
       {disclosures.map((d, i) => (
-        <Item key={`d-${i}`} tag="공시" title={d.title} date={d.date} />
+        <Item key={`d-${i}`} tag="공시" title={d.title} date={d.date} url={d.url} />
       ))}
       {news.map((n, i) => (
-        <Item key={`n-${i}`} tag="뉴스" title={n.title} date={n.date} />
+        <Item key={`n-${i}`} tag="뉴스" title={n.title} date={n.date} url={n.url} />
       ))}
     </ul>
   );

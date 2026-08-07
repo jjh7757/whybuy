@@ -1,6 +1,6 @@
 import "server-only";
 
-export type NewsItem = { title: string; date: string };
+export type NewsItem = { title: string; date: string; url: string };
 
 /**
  * 종목명으로 최근 뉴스 헤드라인을 가져옵니다(Google 뉴스 RSS, 키 발급 불필요).
@@ -23,16 +23,20 @@ export async function getRecentNews(query: string): Promise<NewsItem[]> {
 
     const xml = await res.text();
     const items: NewsItem[] = [];
-    const re = /<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<pubDate>([\s\S]*?)<\/pubDate>[\s\S]*?<\/item>/g;
+    const re =
+      /<item>[\s\S]*?<title>([\s\S]*?)<\/title>[\s\S]*?<link>([\s\S]*?)<\/link>[\s\S]*?<pubDate>([\s\S]*?)<\/pubDate>[\s\S]*?<\/item>/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(xml)) && items.length < 3) {
       const rawTitle = m[1].replace(/^<!\[CDATA\[/, "").replace(/\]\]>$/, "");
       const title = rawTitle.replace(/\s+-\s+[^-]+$/, "").trim();
-      const date = new Date(m[2]).toLocaleDateString("ko-KR", {
+      // 구글 뉴스 RSS 링크는 실제 언론사 기사가 아니라 구글 리다이렉트 URL이지만,
+      // 클릭하면 그 리다이렉트를 거쳐 원문으로 이동하므로 그대로 씁니다.
+      const url = m[2].trim();
+      const date = new Date(m[3]).toLocaleDateString("ko-KR", {
         month: "long",
         day: "numeric",
       });
-      if (title) items.push({ title, date });
+      if (title) items.push({ title, date, url });
     }
     return items;
   } catch {
