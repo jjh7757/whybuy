@@ -628,7 +628,10 @@ export function TradeFlow() {
                   <span className="text-neutral-500">주문 가격</span>
                   <input
                     type="number"
-                    min={1}
+                    // 🔴 min을 step 기준점으로 삼는 HTML 스피너 특성 때문에 min={1}이면
+                    // 1, 51, 101...로 밀려서 항상 뒷자리가 1이 됨(실측: 32951원). 호가단위의
+                    // 배수가 되려면 기준점이 0이어야 한다.
+                    min={0}
                     step={priceTickSize(limitPriceNum > 0 ? limitPriceNum : quote.price)}
                     value={limitPrice}
                     onChange={(e) => setLimitPrice(e.target.value)}
