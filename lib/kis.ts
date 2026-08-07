@@ -315,6 +315,78 @@ export async function getQuote(stockCode: string) {
   };
 }
 
+type DividendResponse = {
+  output1?: Array<{
+    record_date: string; // 배당기준일 (YYYYMMDD)
+    sht_cd: string;
+    isin_name: string;
+    divi_kind: string; // 배당종류(결산/중간 등)
+    per_sto_divi_amt: string; // 주당 배당금
+    divi_rate: string; // 현금배당률(%)
+    divi_pay_dt: string; // 배당지급일 (YYYYMMDD)
+  }>;
+};
+
+export type Dividend = {
+  recordDate: string;
+  payDate: string;
+  kind: string;
+  perShare: number;
+};
+
+const kstDateString = (d: Date) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(d);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}${get("month")}${get("day")}`;
+};
+
+// "YYYYMMDD"와 "YYYY/MM/DD"가 섞여 내려오므로(각각 record_date·divi_pay_dt) 화면에는
+// 하나의 표기로 통일해서 보여줍니다.
+const formatYmd = (raw: string) => {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length !== 8) return "";
+  return `${digits.slice(0, 4)}.${digits.slice(4, 6)}.${digits.slice(6, 8)}`;
+};
+
+/**
+ * 최근 2년 배당 내역을 최신순으로 반환합니다(예탁원정보 배당일정, HHKDB669102C0).
+ *
+ * 🔴 실측으로 확인: 연속조회 파라미터명은 문서 추정("CTS_AREA")과 달리 `CTS`다
+ * (다르면 "ERROR INPUT FIELD NOT FOUND [CTS]"). 나머지 필드명은 추정이 맞았다.
+ */
+export async function getDividends(stockCode: string): Promise<Dividend[]> {
+  const now = new Date();
+  const twoYearsAgo = new Date(now);
+  twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+
+  const data = (await callKis("/uapi/domestic-stock/v1/ksdinfo/dividend", {
+    trId: "HHKDB669102C0",
+    query: {
+      CTS: "",
+      GB1: "0",
+      F_DT: kstDateString(twoYearsAgo),
+      T_DT: kstDateString(now),
+      SHT_CD: stockCode,
+      HIGH_GB: "",
+    },
+  })) as DividendResponse;
+
+  return (data.output1 ?? [])
+    .map((r) => ({
+      recordDate: formatYmd(r.record_date),
+      payDate: formatYmd(r.divi_pay_dt),
+      kind: r.divi_kind,
+      perShare: Number(r.per_sto_divi_amt || 0),
+    }))
+    .filter((d) => d.perShare > 0 && d.recordDate)
+    .sort((a, b) => (a.recordDate < b.recordDate ? 1 : -1));
+}
+
 type DailyChartResponse = {
   output2?: Array<{
     stck_bsop_date: string; // 영업일자 (YYYYMMDD)

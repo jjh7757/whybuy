@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { REASON_TYPES } from "@/lib/rationale";
 import { AiExplain } from "@/components/AiExplain";
+import { DividendInfo } from "@/components/DividendInfo";
 import { PopularStocks } from "@/components/PopularStocks";
 import { PriceChart } from "@/components/PriceChart";
 import { RangeBar } from "@/components/RangeBar";
@@ -440,6 +441,11 @@ export function TradeFlow() {
                 </div>
 
                 <AiExplain target="quote" stockCode={selected.stock_code} />
+
+                <div>
+                  <h3 className="mb-2 text-sm font-bold">배당 정보</h3>
+                  <DividendInfo stockCode={selected.stock_code} currentPrice={quote.price} />
+                </div>
               </>
             )}
           </div>
