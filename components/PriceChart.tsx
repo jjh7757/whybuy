@@ -133,7 +133,13 @@ export function PriceChart({ stockCode }: { stockCode: string }) {
     return (
       <div>
         <div className="mb-1 flex justify-end">{toggle}</div>
-        <div className="h-[140px] animate-pulse rounded-xl bg-neutral-100" />
+        {/* 🔴 "일" 구간은 KIS 분봉을 여러 페이지 이어붙이느라 오래(수십 초까지) 걸릴 수
+            있어서, 그냥 회색 박스만 두면 멈춘 것처럼 보인다. 스피너로 계속 움직이고
+            있음을 보여준다. */}
+        <div className="flex h-[140px] flex-col items-center justify-center gap-2 rounded-xl bg-neutral-100 text-xs text-neutral-400">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-neutral-300 border-t-neutral-500" />
+          차트를 불러오는 중...
+        </div>
       </div>
     );
   }
