@@ -123,7 +123,8 @@ function reserveKisSlot(): Promise<void> {
 }
 
 /**
- * KIS API를 호출합니다. 401(인증 만료)이면 토큰을 무효화하고 딱 1회만 재시도합니다.
+ * KIS API를 호출합니다. 인증 만료(401, 또는 500 + msg_cd "EGW00123")이면
+ * 토큰을 무효화하고 딱 1회만 재시도합니다.
  * 서버리스에서 재시도 루프는 요청 폭주가 되므로 2회 이상 시도하지 않습니다.
  */
 export async function callKis(
@@ -152,13 +153,15 @@ export async function callKis(
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
 
-  if (res.status === 401 && !_retried) {
-    await invalidateToken();
-    return callKis(path, options, true);
-  }
-
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    // 🔴 토큰 만료가 항상 401로 오지 않는다. HTTP 500 + msg_cd "EGW00123"
+    // ("기간이 만료된 token 입니다")로 오는 경우도 재발급 대상으로 취급한다.
+    const isExpiredToken = res.status === 401 || body.includes("EGW00123");
+    if (isExpiredToken && !_retried) {
+      await invalidateToken();
+      return callKis(path, options, true);
+    }
     throw new Error(`KIS 호출 실패 (${res.status}): ${body.slice(0, 300)}`);
   }
 
